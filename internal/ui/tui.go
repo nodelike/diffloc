@@ -26,12 +26,11 @@ func NewModel(stats *model.Stats) Model {
 	return Model{
 		stats:       stats,
 		sortMode:    model.SortByLines,
-		sortReverse: false, // Ascending by default
+		sortReverse: false,
 		ready:       false,
 	}
 }
 
-// Init initializes the model
 func (m Model) Init() tea.Cmd {
 	return nil
 }
@@ -42,13 +41,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		footerHeight := 6 // Reserve space for footer (2 lines + padding)
+		footerHeight := 6
 		if !m.ready {
-			// Initialize viewport
 			m.viewport = viewport.New(msg.Width, msg.Height-footerHeight)
 			m.viewport.YPosition = 0
 			m.viewport.SetContent(m.renderFullContent())
-			m.viewport.GotoBottom() // Start at bottom
+			m.viewport.GotoBottom()
 			m.ready = true
 		} else {
 			m.viewport.Width = msg.Width
@@ -60,7 +58,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c", "esc":
 			return m, tea.Quit
 
-		// Sorting controls
 		case "n":
 			if m.sortMode == model.SortByName {
 				m.sortReverse = !m.sortReverse
@@ -108,7 +105,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Pass through to viewport for scrolling
 	m.viewport, cmd = m.viewport.Update(msg)
 	return m, cmd
 }
@@ -123,7 +119,6 @@ func (m Model) View() string {
 		return "\nInitializing..."
 	}
 
-	// Render viewport and footer
 	isGitRepo := m.stats.TotalAdditions > 0 || m.stats.TotalDeletions > 0 || m.stats.ChangedCount > 0
 
 	return fmt.Sprintf("%s\n%s\n", m.viewport.View(), m.renderFooter(isGitRepo))
@@ -133,31 +128,25 @@ func (m Model) View() string {
 func (m Model) renderFullContent() string {
 	var b strings.Builder
 
-	// Header
 	b.WriteString("\n")
 	b.WriteString(headerStyle.Render("✨ diffloc — Diff Line Counter"))
-	b.WriteString("\n")
-
-	// Check if this is a git repo (has any changes tracked)
 	isGitRepo := m.stats.TotalAdditions > 0 || m.stats.TotalDeletions > 0 || m.stats.ChangedCount > 0
 
 	if isGitRepo {
-		// Git repo: Show changed and unchanged files separately
-		if len(m.stats.ChangedFiles) > 0 {
-			changedBadge := badgeStyle.Render(fmt.Sprintf("%d", len(m.stats.ChangedFiles)))
-			b.WriteString(sectionHeaderStyle.Render(changedBadge + " Changed Files"))
-			b.WriteString("\n")
-			b.WriteString(m.renderFileTable(m.stats.ChangedFiles, true, true))
-		}
-
 		if len(m.stats.UnchangedFiles) > 0 {
 			unchangedBadge := badgeStyle.Render(fmt.Sprintf("%d", len(m.stats.UnchangedFiles)))
 			b.WriteString(sectionHeaderStyle.Render(unchangedBadge + " Unchanged Files"))
 			b.WriteString("\n")
 			b.WriteString(m.renderFileTable(m.stats.UnchangedFiles, false, true))
 		}
+
+		if len(m.stats.ChangedFiles) > 0 {
+			changedBadge := badgeStyle.Render(fmt.Sprintf("%d", len(m.stats.ChangedFiles)))
+			b.WriteString(sectionHeaderStyle.Render(changedBadge + " Changed Files"))
+			b.WriteString("\n")
+			b.WriteString(m.renderFileTable(m.stats.ChangedFiles, true, true))
+		}
 	} else {
-		// Non-git: Show all files in one section without git-specific columns
 		allFiles := append(m.stats.ChangedFiles, m.stats.UnchangedFiles...)
 		if len(allFiles) > 0 {
 			filesBadge := badgeStyle.Render(fmt.Sprintf("%d", len(allFiles)))
@@ -167,7 +156,6 @@ func (m Model) renderFullContent() string {
 		}
 	}
 
-	// Summary
 	b.WriteString(m.renderSummary(isGitRepo))
 
 	return b.String()
@@ -181,7 +169,6 @@ func (m Model) renderFileTable(files []*model.FileInfo, isChanged bool, showGitC
 
 	var b strings.Builder
 
-	// Table header
 	b.WriteString("    ")
 	b.WriteString(tableHeaderStyle.Render(fmt.Sprintf("%-10s", "LINES")))
 	b.WriteString("  ")
@@ -196,7 +183,6 @@ func (m Model) renderFileTable(files []*model.FileInfo, isChanged bool, showGitC
 	b.WriteString(tableHeaderStyle.Render("FILE PATH"))
 	b.WriteString("\n")
 
-	// Separator line
 	b.WriteString("    ")
 	sepLength := 90
 	if !showGitColumns {
@@ -205,17 +191,14 @@ func (m Model) renderFileTable(files []*model.FileInfo, isChanged bool, showGitC
 	b.WriteString(separatorStyle.Render(strings.Repeat("─", sepLength)))
 	b.WriteString("\n")
 
-	// File rows
 	for _, file := range files {
 		b.WriteString("    ")
 
-		// Lines count
 		linesStr := fmt.Sprintf("%-10d", file.Lines)
 		b.WriteString(summaryValueStyle.Render(linesStr))
 		b.WriteString("  ")
 
 		if showGitColumns {
-			// Additions with visual indicator
 			if file.Additions > 0 {
 				addStr := fmt.Sprintf("+%-9d", file.Additions)
 				b.WriteString(additionStyle.Render(addStr))
@@ -224,7 +207,6 @@ func (m Model) renderFileTable(files []*model.FileInfo, isChanged bool, showGitC
 			}
 			b.WriteString("  ")
 
-			// Deletions with visual indicator
 			if file.Deletions > 0 {
 				delStr := fmt.Sprintf("-%-9d", file.Deletions)
 				b.WriteString(deletionStyle.Render(delStr))
@@ -234,15 +216,14 @@ func (m Model) renderFileTable(files []*model.FileInfo, isChanged bool, showGitC
 			b.WriteString("  ")
 		}
 
-		// File path with visual indicator
 		pathPrefix := ""
 		if isChanged && showGitColumns {
 			if file.Additions > 0 && file.Deletions > 0 {
-				pathPrefix = "◆ " // Modified
+				pathPrefix = "◆ "
 			} else if file.Additions > 0 {
-				pathPrefix = "+ " // Added
+				pathPrefix = "+ "
 			} else if file.Deletions > 0 {
-				pathPrefix = "- " // Deleted
+				pathPrefix = "- "
 			}
 		}
 		b.WriteString(filePathStyle.Render(pathPrefix + file.Path))
@@ -256,14 +237,12 @@ func (m Model) renderFileTable(files []*model.FileInfo, isChanged bool, showGitC
 func (m Model) renderSummary(isGitRepo bool) string {
 	var content strings.Builder
 
-	// Title
 	content.WriteString(tableHeaderStyle.Render("📊 SUMMARY"))
 	content.WriteString("\n")
 	content.WriteString(separatorStyle.Render(strings.Repeat("─", 60)))
 	content.WriteString("\n")
 
 	if isGitRepo {
-		// Git repo: Show net change
 		var netChangeStr string
 		var netChangeIcon string
 		var netChangeStyle lipgloss.Style
@@ -286,7 +265,6 @@ func (m Model) renderSummary(isGitRepo bool) string {
 		content.WriteString(netChangeStyle.Render(netChangeIcon + " " + netChangeStr))
 		content.WriteString("\n")
 
-		// File counts with changed/unchanged breakdown
 		accentStyle := lipgloss.NewStyle().Foreground(accentColor).Bold(true)
 		content.WriteString(summaryLabelStyle.Render("Files:"))
 		content.WriteString("       ")
@@ -298,13 +276,11 @@ func (m Model) renderSummary(isGitRepo bool) string {
 		content.WriteString(summaryLabelStyle.Render(" unchanged"))
 		content.WriteString("\n")
 
-		// Line counts
 		content.WriteString(summaryLabelStyle.Render("Total Lines:"))
 		content.WriteString(" ")
 		content.WriteString(summaryValueStyle.Render(fmt.Sprintf("%d", m.stats.TotalLines)))
 		content.WriteString("\n")
 
-		// Changes breakdown
 		content.WriteString(summaryLabelStyle.Render("Changes:"))
 		content.WriteString("    ")
 		content.WriteString(additionStyle.Render(fmt.Sprintf("+%d", m.stats.TotalAdditions)))
@@ -312,7 +288,6 @@ func (m Model) renderSummary(isGitRepo bool) string {
 		content.WriteString(deletionStyle.Render(fmt.Sprintf("-%d", m.stats.TotalDeletions)))
 		content.WriteString(summaryLabelStyle.Render(" removed"))
 	} else {
-		// Non-git: Simple summary
 		content.WriteString(summaryLabelStyle.Render("Total Files:"))
 		content.WriteString(" ")
 		content.WriteString(summaryValueStyle.Render(fmt.Sprintf("%d", m.stats.TotalFiles)))
@@ -329,7 +304,6 @@ func (m Model) renderSummary(isGitRepo bool) string {
 func (m Model) renderFooter(isGitRepo bool) string {
 	var footer strings.Builder
 
-	// Keybindings
 	keybindings := []string{
 		keybindingKeyStyle.Render("↑↓/j/k") + " " + keybindingDescStyle.Render("scroll"),
 		keybindingKeyStyle.Render("n") + " " + keybindingDescStyle.Render("name"),
@@ -347,9 +321,7 @@ func (m Model) renderFooter(isGitRepo bool) string {
 
 	footer.WriteString(strings.Join(keybindings, separatorStyle.Render("  •  ")))
 
-	// Sort indicator
 	sortDir := ""
-
 	sortIcon := ""
 	if m.sortMode != model.SortByName {
 		if m.sortReverse {
@@ -391,7 +363,6 @@ func (m *Model) sortFiles() {
 				less = files[i].Path < files[j].Path
 			}
 
-			// Reverse if needed (for numeric sorts, default is descending)
 			if m.sortReverse {
 				return !less
 			}
@@ -406,9 +377,8 @@ func (m *Model) sortFiles() {
 // Run starts the TUI application
 func Run(stats *model.Stats) error {
 	m := NewModel(stats)
-	m.sortFiles() // Initial sort
+	m.sortFiles()
 
-	// Use alt screen for clean TUI, then print static output after
 	p := tea.NewProgram(
 		m,
 		tea.WithAltScreen(),
@@ -420,7 +390,6 @@ func Run(stats *model.Stats) error {
 		return err
 	}
 
-	// After TUI exits, print full static output to terminal
 	final := finalModel.(Model)
 	fmt.Print("\n")
 	fmt.Print(final.renderStatic())
@@ -430,9 +399,8 @@ func Run(stats *model.Stats) error {
 // PrintStatic prints the output once without interactivity
 func PrintStatic(stats *model.Stats) error {
 	m := NewModel(stats)
-	m.sortFiles() // Initial sort
+	m.sortFiles()
 
-	// Print the view without footer (no interactivity needed)
 	fmt.Print(m.renderStatic())
 	return nil
 }
@@ -445,31 +413,24 @@ func (m Model) renderStatic() string {
 
 	var b strings.Builder
 
-	// Header
-	b.WriteString("\n")
 	b.WriteString(headerStyle.Render("✨ diffloc — Diff Line Counter"))
-	b.WriteString("\n")
-
-	// Check if this is a git repo (has any changes tracked)
 	isGitRepo := m.stats.TotalAdditions > 0 || m.stats.TotalDeletions > 0 || m.stats.ChangedCount > 0
 
 	if isGitRepo {
-		// Git repo: Show changed and unchanged files separately
-		if len(m.stats.ChangedFiles) > 0 {
-			changedBadge := badgeStyle.Render(fmt.Sprintf("%d", len(m.stats.ChangedFiles)))
-			b.WriteString(sectionHeaderStyle.Render(changedBadge + " Changed Files"))
-			b.WriteString("\n")
-			b.WriteString(m.renderFileTable(m.stats.ChangedFiles, true, true))
-		}
-
 		if len(m.stats.UnchangedFiles) > 0 {
 			unchangedBadge := badgeStyle.Render(fmt.Sprintf("%d", len(m.stats.UnchangedFiles)))
 			b.WriteString(sectionHeaderStyle.Render(unchangedBadge + " Unchanged Files"))
 			b.WriteString("\n")
 			b.WriteString(m.renderFileTable(m.stats.UnchangedFiles, false, true))
 		}
+
+		if len(m.stats.ChangedFiles) > 0 {
+			changedBadge := badgeStyle.Render(fmt.Sprintf("%d", len(m.stats.ChangedFiles)))
+			b.WriteString(sectionHeaderStyle.Render(changedBadge + " Changed Files"))
+			b.WriteString("\n")
+			b.WriteString(m.renderFileTable(m.stats.ChangedFiles, true, true))
+		}
 	} else {
-		// Non-git: Show all files in one section without git-specific columns
 		allFiles := append(m.stats.ChangedFiles, m.stats.UnchangedFiles...)
 		if len(allFiles) > 0 {
 			filesBadge := badgeStyle.Render(fmt.Sprintf("%d", len(allFiles)))
@@ -479,7 +440,6 @@ func (m Model) renderStatic() string {
 		}
 	}
 
-	// Summary
 	b.WriteString(m.renderSummary(isGitRepo))
 	b.WriteString("\n")
 
