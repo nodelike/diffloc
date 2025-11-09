@@ -120,6 +120,17 @@ func runAnalyze(cmd *cobra.Command, args []string) {
 		}
 	}
 
+	// Safety check: validate the path is safe to analyze
+	if err := analyzer.ValidatePath(path); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Warn about potentially large directories
+	if shouldWarn, warning := analyzer.ShouldWarnLargeDirectory(path); shouldWarn {
+		fmt.Fprintln(os.Stderr, warning)
+	}
+
 	// Start CPU profiling if requested
 	if cpuProfile != "" {
 		f, err := os.Create(cpuProfile)
