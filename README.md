@@ -1,6 +1,6 @@
 # diffloc
 
-Git diff & line count statistics with a clean TUI. Shows line counts, additions, and deletions for your codebase. Works in non-git repos too. Currently supports Golang, JavaScript, and Python projects, but you can extend it to your needs with a `.diffloc.yaml` config file in your project folder. See [instructions below](#config-file).
+Git diff & line count statistics with a clean TUI. Shows line counts, additions, and deletions for your codebase. Works in non-git repos too.
 
 ## Features
 - Works in git repos and non-git directories
@@ -9,6 +9,7 @@ Git diff & line count statistics with a clean TUI. Shows line counts, additions,
 - Interactive sorting
 - JSON and static output modes
 - Configurable via file or flags
+- Supports Golang, JavaScript, and Python projects (extensible via [.diffloc.yaml](#config-file))
 
 ## Installation
 ```bash
