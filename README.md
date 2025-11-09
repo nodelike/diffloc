@@ -31,10 +31,21 @@ diffloc --static           # Non-interactive output
 
 ### Keyboard Controls
 
+**Scrolling:**
+- `↑` / `k` - Scroll up
+- `↓` / `j` - Scroll down
+- `PgUp` - Page up
+- `PgDn` - Page down
+- `Home` / `g` - Jump to top
+- `End` / `G` - Jump to bottom
+
+**Sorting:**
 - `n` - Sort by name
 - `l` - Sort by lines  
 - `a` - Sort by additions
 - `d` - Sort by deletions
+
+**Other:**
 - `q` - Quit
 
 ### Flags

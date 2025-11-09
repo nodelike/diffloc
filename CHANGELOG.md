@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2025-11-09
+
+### Added
+- **Full viewport scrolling** in interactive TUI mode
+  - Scroll through entire content including file lists, changed/unchanged sections, and summary
+  - Arrow keys (↑/↓) or Vim keys (j/k) for line-by-line scrolling
+  - Page Up/Page Down for faster navigation
+  - Home/g to jump to top, End/G to jump to bottom
+  - Scroll position indicator showing current line and total lines
+  - Visual indicators when more content is available above/below
+
+### Changed
+- Improved keyboard controls section in README with dedicated scrolling section
+
 ## [1.0.1] - 2025-11-09
 
 ### Added
