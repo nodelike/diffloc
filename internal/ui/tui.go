@@ -12,18 +12,24 @@ import (
 
 // Model represents the TUI state
 type Model struct {
-	stats       *model.Stats
-	sortMode    model.SortMode
-	sortReverse bool // Track if numeric sort is reversed
-	err         error
+	stats          *model.Stats
+	sortMode       model.SortMode
+	sortReverse    bool // Track if numeric sort is reversed
+	err            error
+	scrollOffset   int  // Current scroll position (line-based)
+	viewportHeight int  // Available height for viewport
+	contentHeight  int  // Total content height
 }
 
 // NewModel creates a new TUI model
 func NewModel(stats *model.Stats) Model {
 	return Model{
-		stats:       stats,
-		sortMode:    model.SortByLines,
-		sortReverse: false, // Ascending by default
+		stats:          stats,
+		sortMode:       model.SortByLines,
+		sortReverse:    false, // Ascending by default
+		scrollOffset:   0,
+		viewportHeight: 40, // Default, will be updated based on terminal size
+		contentHeight:  0,
 	}
 }
 
@@ -34,11 +40,55 @@ func (m Model) Init() tea.Cmd {
 
 // Update handles messages and updates the model
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Calculate content height for scroll bounds
+	// We need to render content to know its height
+	content := m.renderFullContent()
+	lines := strings.Split(content, "\n")
+	m.contentHeight = len(lines)
+	
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		// Update viewport height - leave room for footer
+		m.viewportHeight = msg.Height - 3
+		if m.viewportHeight < 10 {
+			m.viewportHeight = 10
+		}
+		
 	case tea.KeyMsg:
+		maxScroll := m.contentHeight - m.viewportHeight
+		if maxScroll < 0 {
+			maxScroll = 0
+		}
+
 		switch msg.String() {
 		case "q", "ctrl+c", "esc":
 			return m, tea.Quit
+			
+		// Scrolling controls
+		case "up", "k":
+			if m.scrollOffset > 0 {
+				m.scrollOffset--
+			}
+		case "down", "j":
+			if m.scrollOffset < maxScroll {
+				m.scrollOffset++
+			}
+		case "pgup":
+			m.scrollOffset -= m.viewportHeight / 2
+			if m.scrollOffset < 0 {
+				m.scrollOffset = 0
+			}
+		case "pgdown":
+			m.scrollOffset += m.viewportHeight / 2
+			if m.scrollOffset > maxScroll {
+				m.scrollOffset = maxScroll
+			}
+		case "home", "g":
+			m.scrollOffset = 0
+		case "end", "G":
+			m.scrollOffset = maxScroll
+
+		// Sorting controls
 		case "n":
 			if m.sortMode == model.SortByName {
 				m.sortReverse = !m.sortReverse
@@ -47,6 +97,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sortReverse = false
 			}
 			m.sortFiles()
+			m.scrollOffset = 0 // Reset scroll on sort change
 		case "l":
 			if m.sortMode == model.SortByLines {
 				m.sortReverse = !m.sortReverse
@@ -55,6 +106,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sortReverse = true // Default descending for numbers
 			}
 			m.sortFiles()
+			m.scrollOffset = 0
 		case "a":
 			if m.sortMode == model.SortByAdditions {
 				m.sortReverse = !m.sortReverse
@@ -63,6 +115,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sortReverse = true // Default descending for numbers
 			}
 			m.sortFiles()
+			m.scrollOffset = 0
 		case "d":
 			if m.sortMode == model.SortByDeletions {
 				m.sortReverse = !m.sortReverse
@@ -71,6 +124,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sortReverse = true // Default descending for numbers
 			}
 			m.sortFiles()
+			m.scrollOffset = 0
 		}
 	}
 	return m, nil
@@ -82,6 +136,61 @@ func (m Model) View() string {
 		return "\n" + errorStyle.Render(fmt.Sprintf("⚠️  Error: %v", m.err)) + "\n"
 	}
 
+	// Render the full content first
+	content := m.renderFullContent()
+	
+	// Split into lines
+	lines := strings.Split(content, "\n")
+	
+	// Calculate visible range
+	maxScroll := m.contentHeight - m.viewportHeight
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	
+	scrollOffset := m.scrollOffset
+	if scrollOffset > maxScroll {
+		scrollOffset = maxScroll
+	}
+	if scrollOffset < 0 {
+		scrollOffset = 0
+	}
+	
+	start := scrollOffset
+	end := scrollOffset + m.viewportHeight
+	if end > len(lines) {
+		end = len(lines)
+	}
+	if start < 0 {
+		start = 0
+	}
+	
+	// Get visible lines
+	visibleLines := lines[start:end]
+	
+	// Add footer with scroll indicators
+	var result strings.Builder
+	result.WriteString(strings.Join(visibleLines, "\n"))
+	result.WriteString("\n")
+	
+	// Render footer
+	isGitRepo := m.stats.TotalAdditions > 0 || m.stats.TotalDeletions > 0 || m.stats.ChangedCount > 0
+	result.WriteString(m.renderFooter(isGitRepo))
+	
+	// Add scroll indicators
+	if scrollOffset > 0 {
+		result.WriteString(mutedNumberStyle.Render(fmt.Sprintf(" • Line %d/%d", scrollOffset+1, m.contentHeight)))
+	}
+	if scrollOffset < maxScroll {
+		result.WriteString(mutedNumberStyle.Render(" • More below ↓"))
+	}
+	result.WriteString("\n")
+	
+	return result.String()
+}
+
+// renderFullContent renders the complete content without scrolling
+func (m Model) renderFullContent() string {
 	var b strings.Builder
 
 	// Header
@@ -120,10 +229,6 @@ func (m Model) View() string {
 
 	// Summary
 	b.WriteString(m.renderSummary(isGitRepo))
-
-	// Footer with keybindings
-	b.WriteString(m.renderFooter(isGitRepo))
-	b.WriteString("\n")
 
 	return b.String()
 }
@@ -286,6 +391,7 @@ func (m Model) renderFooter(isGitRepo bool) string {
 
 	// Keybindings
 	keybindings := []string{
+		keybindingKeyStyle.Render("↑↓/j/k") + " " + keybindingDescStyle.Render("scroll"),
 		keybindingKeyStyle.Render("n") + " " + keybindingDescStyle.Render("name"),
 		keybindingKeyStyle.Render("l") + " " + keybindingDescStyle.Render("lines"),
 	}
