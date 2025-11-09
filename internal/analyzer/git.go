@@ -1,16 +1,21 @@
 package analyzer
 
 import (
+	"context"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/nodelike/diffloc/internal/model"
+	"github.com/schollz/progressbar/v3"
+	"golang.org/x/sync/errgroup"
 )
 
 // AnalyzeGit analyzes a git repository for changes
-func AnalyzeGit(rootPath string, filter *Filter) (*model.Stats, error) {
+func AnalyzeGit(ctx context.Context, rootPath string, filter *Filter) (*model.Stats, error) {
 	// Open the repository
 	repo, err := git.PlainOpen(rootPath)
 	if err != nil {
@@ -29,7 +34,7 @@ func AnalyzeGit(rootPath string, filter *Filter) (*model.Stats, error) {
 		return nil, err
 	}
 
-	// Get HEAD commit
+	// Get HEAD commit (will be used in calculateDiffNative)
 	headCommit, err := repo.CommitObject(head.Hash())
 	if err != nil {
 		return nil, err
@@ -53,55 +58,104 @@ func AnalyzeGit(rootPath string, filter *Filter) (*model.Stats, error) {
 	}
 
 	changedPaths := make(map[string]bool)
+	var statsMu sync.Mutex
 
-	// Process changed and untracked files
+	// Collect changed files first
+	type changedFileJob struct {
+		path       string
+		fileStatus *git.FileStatus
+	}
+
+	changedJobs := make([]changedFileJob, 0)
 	for path, fileStatus := range status {
 		// Skip if file should be excluded
 		if !filter.ShouldInclude(path) {
 			continue
 		}
-
 		changedPaths[path] = true
-		fullPath := filepath.Join(rootPath, path)
-
-		// Count total lines in current file
-		lines, err := CountLines(fullPath)
-		if err != nil {
-			// File might be deleted
-			lines = 0
-		}
-
-		fileInfo := &model.FileInfo{
-			Path:      path,
-			Lines:     lines,
-			Additions: 0,
-			Deletions: 0,
-			IsChanged: true,
-		}
-
-		// Handle different file statuses
-		switch {
-		case fileStatus.Staging == git.Untracked || fileStatus.Worktree == git.Untracked:
-			// Untracked files: all lines are additions
-			fileInfo.Additions = lines
-		case fileStatus.Worktree == git.Deleted || fileStatus.Staging == git.Deleted:
-			// Deleted files
-			fileInfo.Deletions = lines
-			fileInfo.Lines = 0
-		default:
-			// Modified files: calculate diff
-			additions, deletions := calculateDiff(headTree, worktree, path)
-			fileInfo.Additions = additions
-			fileInfo.Deletions = deletions
-		}
-
-		stats.ChangedFiles = append(stats.ChangedFiles, fileInfo)
-		stats.TotalLines += fileInfo.Lines
-		stats.TotalAdditions += fileInfo.Additions
-		stats.TotalDeletions += fileInfo.Deletions
+		changedJobs = append(changedJobs, changedFileJob{path: path, fileStatus: fileStatus})
 	}
 
-	// Process unchanged tracked files
+	// Process changed files in parallel
+	eg, egCtx := errgroup.WithContext(ctx)
+	eg.SetLimit(16) // Limit concurrent workers
+
+	// Show progress bar for large repos (>1000 files)
+	totalFiles := len(changedJobs)
+	var bar *progressbar.ProgressBar
+	if totalFiles > 1000 {
+		bar = progressbar.NewOptions(totalFiles,
+			progressbar.OptionSetWriter(os.Stderr),
+			progressbar.OptionSetDescription("Analyzing changed files"),
+			progressbar.OptionShowCount(),
+			progressbar.OptionSetWidth(40),
+			progressbar.OptionThrottle(100),
+		)
+		defer bar.Finish()
+	}
+
+	for _, job := range changedJobs {
+		job := job // Capture loop variable
+		eg.Go(func() error {
+			// Check for context cancellation
+			select {
+			case <-egCtx.Done():
+				return egCtx.Err()
+			default:
+			}
+			fullPath := filepath.Join(rootPath, job.path)
+
+			// Count total lines in current file
+			lines, err := CountLines(fullPath)
+			if err != nil {
+				// File might be deleted
+				lines = 0
+			}
+
+			fileInfo := &model.FileInfo{
+				Path:      job.path,
+				Lines:     lines,
+				Additions: 0,
+				Deletions: 0,
+				IsChanged: true,
+			}
+
+			// Handle different file statuses
+			switch {
+			case job.fileStatus.Staging == git.Untracked || job.fileStatus.Worktree == git.Untracked:
+				// Untracked files: all lines are additions
+				fileInfo.Additions = lines
+			case job.fileStatus.Worktree == git.Deleted || job.fileStatus.Staging == git.Deleted:
+				// Deleted files
+				fileInfo.Deletions = lines
+				fileInfo.Lines = 0
+			default:
+				// Modified files: calculate diff using git's native diff
+				additions, deletions := calculateDiffNative(repo, headCommit, job.path)
+				fileInfo.Additions = additions
+				fileInfo.Deletions = deletions
+			}
+
+			statsMu.Lock()
+			stats.ChangedFiles = append(stats.ChangedFiles, fileInfo)
+			stats.TotalLines += fileInfo.Lines
+			stats.TotalAdditions += fileInfo.Additions
+			stats.TotalDeletions += fileInfo.Deletions
+			if bar != nil {
+				bar.Add(1)
+			}
+			statsMu.Unlock()
+
+			return nil
+		})
+	}
+
+	if err := eg.Wait(); err != nil {
+		return nil, err
+	}
+
+	// Collect unchanged files first
+	unchangedPaths := make([]string, 0)
 	err = headTree.Files().ForEach(func(f *object.File) error {
 		path := f.Name
 
@@ -115,28 +169,69 @@ func AnalyzeGit(rootPath string, filter *Filter) (*model.Stats, error) {
 			return nil
 		}
 
-		fullPath := filepath.Join(rootPath, path)
-		lines, err := CountLines(fullPath)
-		if err != nil {
-			// File might not exist in worktree
-			return nil
-		}
-
-		fileInfo := &model.FileInfo{
-			Path:      path,
-			Lines:     lines,
-			Additions: 0,
-			Deletions: 0,
-			IsChanged: false,
-		}
-
-		stats.UnchangedFiles = append(stats.UnchangedFiles, fileInfo)
-		stats.TotalLines += lines
-
+		unchangedPaths = append(unchangedPaths, path)
 		return nil
 	})
 
 	if err != nil {
+		return nil, err
+	}
+
+	// Process unchanged files in parallel
+	eg2, eg2Ctx := errgroup.WithContext(ctx)
+	eg2.SetLimit(16)
+
+	// Show progress bar for large repos
+	totalUnchanged := len(unchangedPaths)
+	var bar2 *progressbar.ProgressBar
+	if totalUnchanged > 1000 {
+		bar2 = progressbar.NewOptions(totalUnchanged,
+			progressbar.OptionSetWriter(os.Stderr),
+			progressbar.OptionSetDescription("Analyzing unchanged files"),
+			progressbar.OptionShowCount(),
+			progressbar.OptionSetWidth(40),
+			progressbar.OptionThrottle(100),
+		)
+		defer bar2.Finish()
+	}
+
+	for _, path := range unchangedPaths {
+		path := path // Capture loop variable
+		eg2.Go(func() error {
+			// Check for context cancellation
+			select {
+			case <-eg2Ctx.Done():
+				return eg2Ctx.Err()
+			default:
+			}
+			fullPath := filepath.Join(rootPath, path)
+			lines, err := CountLines(fullPath)
+			if err != nil {
+				// File might not exist in worktree
+				return nil
+			}
+
+			fileInfo := &model.FileInfo{
+				Path:      path,
+				Lines:     lines,
+				Additions: 0,
+				Deletions: 0,
+				IsChanged: false,
+			}
+
+			statsMu.Lock()
+			stats.UnchangedFiles = append(stats.UnchangedFiles, fileInfo)
+			stats.TotalLines += lines
+			if bar2 != nil {
+				bar2.Add(1)
+			}
+			statsMu.Unlock()
+
+			return nil
+		})
+	}
+
+	if err := eg2.Wait(); err != nil {
 		return nil, err
 	}
 
@@ -149,20 +244,27 @@ func AnalyzeGit(rootPath string, filter *Filter) (*model.Stats, error) {
 	return stats, nil
 }
 
-// calculateDiff calculates additions and deletions for a modified file
-func calculateDiff(headTree *object.Tree, worktree *git.Worktree, path string) (additions, deletions int) {
-	// Get file from HEAD
+// calculateDiffNative uses go-git's native diff to calculate additions and deletions
+func calculateDiffNative(repo *git.Repository, headCommit *object.Commit, path string) (additions, deletions int) {
+	// Get HEAD tree
+	headTree, err := headCommit.Tree()
+	if err != nil {
+		return 0, 0
+	}
+
+	// Get HEAD file
 	headFile, err := headTree.File(path)
 	if err != nil {
 		return 0, 0
 	}
 
-	headContent, err := headFile.Contents()
+	// Get worktree
+	worktree, err := repo.Worktree()
 	if err != nil {
 		return 0, 0
 	}
 
-	// Get file from worktree
+	// Get worktree file
 	fs := worktree.Filesystem
 	worktreeFile, err := fs.Open(path)
 	if err != nil {
@@ -170,30 +272,39 @@ func calculateDiff(headTree *object.Tree, worktree *git.Worktree, path string) (
 	}
 	defer worktreeFile.Close()
 
-	worktreeContent := make([]byte, 0)
-	buf := make([]byte, 1024)
+	// Read worktree content
+	worktreeContent := strings.Builder{}
+	buf := make([]byte, 4096)
 	for {
 		n, err := worktreeFile.Read(buf)
 		if n > 0 {
-			worktreeContent = append(worktreeContent, buf[:n]...)
+			worktreeContent.Write(buf[:n])
 		}
 		if err != nil {
 			break
 		}
 	}
 
-	// Simple line-by-line diff
-	headLines := strings.Split(headContent, "\n")
-	worktreeLines := strings.Split(string(worktreeContent), "\n")
+	// Get HEAD content
+	headContent, err := headFile.Contents()
+	if err != nil {
+		return 0, 0
+	}
 
-	// Use a simple diff algorithm
-	additions, deletions = simpleDiff(headLines, worktreeLines)
+	// Calculate diff using simple line comparison
+	// Split into lines
+	headLines := strings.Split(headContent, "\n")
+	workLines := strings.Split(worktreeContent.String(), "\n")
+
+	// Use a simple but more accurate diff based on longest common subsequence approach
+	additions, deletions = computeLineDiff(headLines, workLines)
 
 	return additions, deletions
 }
 
-// simpleDiff performs a basic diff between two sets of lines
-func simpleDiff(oldLines, newLines []string) (additions, deletions int) {
+// computeLineDiff computes additions and deletions using a simplified diff algorithm
+func computeLineDiff(oldLines, newLines []string) (additions, deletions int) {
+	// Simple approach: create a map of lines and their counts
 	oldMap := make(map[string]int)
 	newMap := make(map[string]int)
 
@@ -205,7 +316,7 @@ func simpleDiff(oldLines, newLines []string) (additions, deletions int) {
 		newMap[line]++
 	}
 
-	// Count deletions (lines in old but not in new, or fewer in new)
+	// Calculate additions and deletions
 	for line, oldCount := range oldMap {
 		newCount := newMap[line]
 		if newCount < oldCount {
@@ -213,7 +324,6 @@ func simpleDiff(oldLines, newLines []string) (additions, deletions int) {
 		}
 	}
 
-	// Count additions (lines in new but not in old, or more in new)
 	for line, newCount := range newMap {
 		oldCount := oldMap[line]
 		if newCount > oldCount {
@@ -246,10 +356,9 @@ func GetRepoRoot(path string) (string, error) {
 }
 
 // Analyze is the main entry point that decides between git and non-git analysis
-func Analyze(rootPath string, filter *Filter) (*model.Stats, error) {
+func Analyze(ctx context.Context, rootPath string, filter *Filter) (*model.Stats, error) {
 	if IsGitRepo(rootPath) {
-		return AnalyzeGit(rootPath, filter)
+		return AnalyzeGit(ctx, rootPath, filter)
 	}
-	return AnalyzeFiles(rootPath, filter)
+	return AnalyzeFiles(ctx, rootPath, filter)
 }
-

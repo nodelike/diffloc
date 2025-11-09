@@ -2,6 +2,8 @@ package analyzer
 
 import (
 	"bufio"
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -16,13 +18,15 @@ type Filter struct {
 	excludePatterns  []*regexp.Regexp
 	gitignoreGlobs   []glob.Glob
 	respectGitignore bool
+	excludeTests     bool
 }
 
 // NewFilter creates a new filter with default or custom settings
-func NewFilter(allowedExts []string, customExcludes []string, respectGitignore bool) *Filter {
+func NewFilter(allowedExts []string, customExcludes []string, respectGitignore bool, excludeTests bool) *Filter {
 	f := &Filter{
 		allowedExts:      make(map[string]bool),
 		respectGitignore: respectGitignore,
+		excludeTests:     excludeTests,
 	}
 
 	// Set allowed extensions (default if not provided)
@@ -42,6 +46,7 @@ func NewFilter(allowedExts []string, customExcludes []string, respectGitignore b
 
 	// Always excluded patterns (regardless of flags)
 	alwaysExclude := []string{
+		// Common directories
 		`(^|/)node_modules($|/)`,
 		`(^|/)venv($|/)`,
 		`(^|/)\.venv($|/)`,
@@ -56,28 +61,60 @@ func NewFilter(allowedExts []string, customExcludes []string, respectGitignore b
 		`(^|/)vendor($|/)`,
 		`(^|/)bin($|/)`,
 		`(^|/)tmp($|/)`,
+		// Lock files
 		`\.lock$`,
 		`-lock\.json$`,
 		`-lock\.yaml$`,
 		`Pipfile\.lock$`,
 		`\.gitignore$`,
+		// Binaries
 		`\.exe$`,
 		`\.so$`,
 		`\.dylib$`,
 		`\.dll$`,
+		// Generated files
 		`_templ\.go$`,
+		// Images
 		`\.(jpg|jpeg|png|gif|bmp|svg|ico|webp|tiff|tif|psd|raw|heic|avif)$`,
+		// Python-specific
+		`\.pyc$`,
+		`\.pyo$`,
+		`\.pyd$`,
+		`\.egg$`,
+		`(^|/)\.eggs($|/)`,
+		`(^|/)\.pytest_cache($|/)`,
+		`(^|/)\.mypy_cache($|/)`,
+		// Golang-specific  
+		`\.pb\.go$`,
+		`_gen\.go$`,
+		// JS/Node-specific
+		`\.min\.js$`,
+		`\.bundle\.js$`,
+		`\.eslintcache`,
+		`(^|/)\.nyc_output($|/)`,
+		`(^|/)\.yarn($|/)`,
+		`(^|/)\.npm($|/)`,
+		`(^|/)cypress($|/)`,
+		`(^|/)jest-cache($|/)`,
 	}
 
-	f.excludePatterns = make([]*regexp.Regexp, 0, len(alwaysExclude)+len(customExcludes))
-	for _, pattern := range alwaysExclude {
-		if re, err := regexp.Compile(pattern); err == nil {
-			f.excludePatterns = append(f.excludePatterns, re)
-		}
+	// Test file patterns (conditionally excluded)
+	testPatterns := []string{
+		`_test\.go$`,
+		`(^|/)tests?($|/)`,
+		`\.test\.(js|ts|jsx|tsx)$`,
+		`\.spec\.(js|ts|jsx|tsx)$`,
 	}
 
-	// Add custom excludes
-	for _, pattern := range customExcludes {
+	// Combine patterns
+	allPatterns := alwaysExclude
+	if f.excludeTests {
+		allPatterns = append(allPatterns, testPatterns...)
+	}
+	allPatterns = append(allPatterns, customExcludes...)
+
+	f.excludePatterns = make([]*regexp.Regexp, 0, len(allPatterns))
+	for _, pattern := range allPatterns {
 		if re, err := regexp.Compile(pattern); err == nil {
 			f.excludePatterns = append(f.excludePatterns, re)
 		}
@@ -169,7 +206,8 @@ func (f *Filter) ShouldInclude(path string) bool {
 	return true
 }
 
-// CountLines counts the number of lines in a file
+// CountLines counts the number of lines in a file using chunked reading
+// Returns 0 for binary files (detected by null bytes in first chunk)
 func CountLines(filePath string) (int, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -177,12 +215,33 @@ func CountLines(filePath string) (int, error) {
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
+	const bufferSize = 32 * 1024 // 32KB chunks
+	buf := make([]byte, bufferSize)
 	count := 0
-	for scanner.Scan() {
-		count++
+	firstChunk := true
+
+	for {
+		n, err := file.Read(buf)
+		if n > 0 {
+			// Binary file detection on first chunk
+			if firstChunk {
+				if bytes.IndexByte(buf[:n], 0) != -1 {
+					// Contains null byte - likely binary file
+					return 0, nil
+				}
+				firstChunk = false
+			}
+			
+			count += bytes.Count(buf[:n], []byte{'\n'})
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return count, err
+		}
 	}
 
-	return count, scanner.Err()
+	return count, nil
 }
 
