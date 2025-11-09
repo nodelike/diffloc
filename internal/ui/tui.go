@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/nodelike/diffloc/internal/model"
 )
 
@@ -78,37 +79,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders the TUI
 func (m Model) View() string {
 	if m.err != nil {
-		return errorStyle.Render(fmt.Sprintf("Error: %v", m.err))
+		return "\n" + errorStyle.Render(fmt.Sprintf("⚠️  Error: %v", m.err)) + "\n"
 	}
 
 	var b strings.Builder
 
 	// Header
-	b.WriteString(headerStyle.Render("✨ diffloc - Diff Line Counter"))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
+	b.WriteString(headerStyle.Render("✨ diffloc — Diff Line Counter"))
+	b.WriteString("\n")
 
 	// Changed files section
 	if len(m.stats.ChangedFiles) > 0 {
-		b.WriteString(sectionHeaderStyle.Render("Changed Files:"))
+		changedBadge := badgeStyle.Render(fmt.Sprintf("%d", len(m.stats.ChangedFiles)))
+		b.WriteString(sectionHeaderStyle.Render(changedBadge + " Changed Files"))
 		b.WriteString("\n")
 		b.WriteString(m.renderFileTable(m.stats.ChangedFiles, true))
-		b.WriteString("\n")
 	}
 
 	// Unchanged files section
 	if len(m.stats.UnchangedFiles) > 0 {
-		b.WriteString(sectionHeaderStyle.Render("Unchanged Files:"))
+		unchangedBadge := badgeStyle.Render(fmt.Sprintf("%d", len(m.stats.UnchangedFiles)))
+		b.WriteString(sectionHeaderStyle.Render(unchangedBadge + " Unchanged Files"))
 		b.WriteString("\n")
 		b.WriteString(m.renderFileTable(m.stats.UnchangedFiles, false))
-		b.WriteString("\n")
 	}
 
 	// Summary
 	b.WriteString(m.renderSummary())
-	b.WriteString("\n")
 
 	// Footer with keybindings
 	b.WriteString(m.renderFooter())
+	b.WriteString("\n")
 
 	return b.String()
 }
@@ -116,63 +118,66 @@ func (m Model) View() string {
 // renderFileTable renders a table of files
 func (m Model) renderFileTable(files []*model.FileInfo, isChanged bool) string {
 	if len(files) == 0 {
-		return mutedNumberStyle.Render("  (none)")
+		return mutedNumberStyle.Render("    (none)") + "\n"
 	}
 
 	var b strings.Builder
 
-	// Table header
+	// Table header with better spacing
+	b.WriteString("    ")
+	b.WriteString(tableHeaderStyle.Render(fmt.Sprintf("%-10s", "LINES")))
 	b.WriteString("  ")
-	b.WriteString(tableHeaderStyle.Render(fmt.Sprintf("%-8s", "Lines")))
+	b.WriteString(tableHeaderStyle.Render(fmt.Sprintf("%-10s", "ADDED")))
 	b.WriteString("  ")
-	b.WriteString(tableHeaderStyle.Render(fmt.Sprintf("%-8s", "+Add")))
+	b.WriteString(tableHeaderStyle.Render(fmt.Sprintf("%-10s", "REMOVED")))
 	b.WriteString("  ")
-	b.WriteString(tableHeaderStyle.Render(fmt.Sprintf("%-8s", "-Del")))
-	b.WriteString("  ")
-	b.WriteString(tableHeaderStyle.Render("File"))
+	b.WriteString(tableHeaderStyle.Render("FILE PATH"))
 	b.WriteString("\n")
 
-	// Separator
-	b.WriteString(mutedNumberStyle.Render("  " + strings.Repeat("─", 80)))
+	// Separator line
+	b.WriteString("    ")
+	b.WriteString(separatorStyle.Render(strings.Repeat("─", 90)))
 	b.WriteString("\n")
 
 	// File rows
 	for _, file := range files {
+		b.WriteString("    ")
+
+		// Lines count - same style for all files
+		linesStr := fmt.Sprintf("%-10d", file.Lines)
+		b.WriteString(summaryValueStyle.Render(linesStr))
 		b.WriteString("  ")
 
-		// Lines count
-		linesStr := fmt.Sprintf("%-8d", file.Lines)
-		if isChanged {
-			b.WriteString(summaryValueStyle.Render(linesStr))
-		} else {
-			b.WriteString(mutedNumberStyle.Render(linesStr))
-		}
-		b.WriteString("  ")
-
-		// Additions
-		addStr := fmt.Sprintf("+%-7d", file.Additions)
+		// Additions with visual indicator
 		if file.Additions > 0 {
+			addStr := fmt.Sprintf("+%-9d", file.Additions)
 			b.WriteString(additionStyle.Render(addStr))
 		} else {
-			b.WriteString(mutedNumberStyle.Render(addStr))
+			b.WriteString(mutedNumberStyle.Render(fmt.Sprintf("%-10s", "—")))
 		}
 		b.WriteString("  ")
 
-		// Deletions
-		delStr := fmt.Sprintf("-%-7d", file.Deletions)
+		// Deletions with visual indicator
 		if file.Deletions > 0 {
+			delStr := fmt.Sprintf("-%-9d", file.Deletions)
 			b.WriteString(deletionStyle.Render(delStr))
 		} else {
-			b.WriteString(mutedNumberStyle.Render(delStr))
+			b.WriteString(mutedNumberStyle.Render(fmt.Sprintf("%-10s", "—")))
 		}
 		b.WriteString("  ")
 
-		// File path
+		// File path with visual indicator
+		pathPrefix := ""
 		if isChanged {
-			b.WriteString(filePathStyle.Render(file.Path))
-		} else {
-			b.WriteString(unchangedFilePathStyle.Render(file.Path))
+			if file.Additions > 0 && file.Deletions > 0 {
+				pathPrefix = "◆ " // Modified
+			} else if file.Additions > 0 {
+				pathPrefix = "+ " // Added
+			} else if file.Deletions > 0 {
+				pathPrefix = "- " // Deleted
+			}
 		}
+		b.WriteString(filePathStyle.Render(pathPrefix + file.Path))
 		b.WriteString("\n")
 	}
 
@@ -183,69 +188,102 @@ func (m Model) renderFileTable(files []*model.FileInfo, isChanged bool) string {
 func (m Model) renderSummary() string {
 	var content strings.Builder
 
-	// Net change
+	// Title
+	content.WriteString(tableHeaderStyle.Render("📊 SUMMARY"))
+	content.WriteString("\n")
+	content.WriteString(separatorStyle.Render(strings.Repeat("─", 60)))
+	content.WriteString("\n")
+
+	// Net change with visual indicator
 	netChangeStr := ""
+	netChangeIcon := ""
 	netChangeStyle := summaryNeutralStyle
 	if m.stats.NetChange > 0 {
-		netChangeStr = fmt.Sprintf("+%d (increased)", m.stats.NetChange)
+		netChangeIcon = "▲"
+		netChangeStr = fmt.Sprintf("+%d lines", m.stats.NetChange)
 		netChangeStyle = summaryPositiveStyle
 	} else if m.stats.NetChange < 0 {
-		netChangeStr = fmt.Sprintf("%d (decreased)", m.stats.NetChange)
+		netChangeIcon = "▼"
+		netChangeStr = fmt.Sprintf("%d lines", m.stats.NetChange)
 		netChangeStyle = summaryNegativeStyle
 	} else {
-		netChangeStr = "0 (no change)"
+		netChangeIcon = "●"
+		netChangeStr = "no change"
+		netChangeStyle = summaryNeutralStyle
 	}
 
-	content.WriteString(summaryLabelStyle.Render("Net Change: "))
-	content.WriteString(netChangeStyle.Render(netChangeStr))
-	content.WriteString("\n\n")
+	content.WriteString(summaryLabelStyle.Render("Net Change:"))
+	content.WriteString("  ")
+	content.WriteString(netChangeStyle.Render(netChangeIcon + " " + netChangeStr))
+	content.WriteString("\n")
 
 	// File counts
-	content.WriteString(summaryLabelStyle.Render("Total Files: "))
+	accentStyle := lipgloss.NewStyle().Foreground(accentColor).Bold(true)
+	content.WriteString(summaryLabelStyle.Render("Files:"))
+	content.WriteString("       ")
 	content.WriteString(summaryValueStyle.Render(fmt.Sprintf("%d", m.stats.TotalFiles)))
-	content.WriteString(summaryLabelStyle.Render(fmt.Sprintf(" (%d changed, %d unchanged)",
-		m.stats.ChangedCount, m.stats.UnchangedCount)))
+	content.WriteString(summaryLabelStyle.Render(" total  •  "))
+	content.WriteString(accentStyle.Render(fmt.Sprintf("%d", m.stats.ChangedCount)))
+	content.WriteString(summaryLabelStyle.Render(" changed  •  "))
+	content.WriteString(mutedNumberStyle.Render(fmt.Sprintf("%d", m.stats.UnchangedCount)))
+	content.WriteString(summaryLabelStyle.Render(" unchanged"))
 	content.WriteString("\n")
 
 	// Line counts
-	content.WriteString(summaryLabelStyle.Render("Total Lines: "))
+	content.WriteString(summaryLabelStyle.Render("Total Lines:"))
+	content.WriteString(" ")
 	content.WriteString(summaryValueStyle.Render(fmt.Sprintf("%d", m.stats.TotalLines)))
 	content.WriteString("\n")
 
-	content.WriteString(summaryLabelStyle.Render("Insertions:  "))
+	// Changes breakdown
+	content.WriteString(summaryLabelStyle.Render("Changes:"))
+	content.WriteString("    ")
 	content.WriteString(additionStyle.Render(fmt.Sprintf("+%d", m.stats.TotalAdditions)))
-	content.WriteString("\n")
-
-	content.WriteString(summaryLabelStyle.Render("Deletions:   "))
+	content.WriteString(summaryLabelStyle.Render(" added  •  "))
 	content.WriteString(deletionStyle.Render(fmt.Sprintf("-%d", m.stats.TotalDeletions)))
+	content.WriteString(summaryLabelStyle.Render(" removed"))
 
 	return summaryBoxStyle.Render(content.String())
 }
 
 // renderFooter renders the footer with keybindings
 func (m Model) renderFooter() string {
+	var footer strings.Builder
+
+	// Keybindings
+	keybindings := []string{
+		keybindingKeyStyle.Render("n") + " " + keybindingDescStyle.Render("name"),
+		keybindingKeyStyle.Render("l") + " " + keybindingDescStyle.Render("lines"),
+		keybindingKeyStyle.Render("a") + " " + keybindingDescStyle.Render("additions"),
+		keybindingKeyStyle.Render("d") + " " + keybindingDescStyle.Render("deletions"),
+		keybindingKeyStyle.Render("q") + " " + keybindingDescStyle.Render("quit"),
+	}
+
+	footer.WriteString(strings.Join(keybindings, separatorStyle.Render("  •  ")))
+
+	// Sort indicator
 	sortDir := ""
+	sortIcon := ""
 	if m.sortMode != model.SortByName {
 		if m.sortReverse {
-			sortDir = " ↓"
+			sortDir = "desc"
+			sortIcon = "↓"
 		} else {
-			sortDir = " ↑"
+			sortDir = "asc"
+			sortIcon = "↑"
 		}
-	}
-	currentSort := fmt.Sprintf("(sorted by: %s%s)", m.sortMode.String(), sortDir)
-
-	keybindings := []string{
-		keybindingStyle.Render("n") + "=name",
-		keybindingStyle.Render("l") + "=lines",
-		keybindingStyle.Render("a") + "=additions",
-		keybindingStyle.Render("d") + "=deletions",
-		keybindingStyle.Render("q") + "=quit",
+	} else {
+		sortDir = "A→Z"
+		sortIcon = "⇅"
 	}
 
-	footer := strings.Join(keybindings, separatorStyle.Render(" | "))
-	footer += " " + mutedNumberStyle.Render(currentSort)
+	accentStyle := lipgloss.NewStyle().Foreground(accentColor).Bold(true)
+	footer.WriteString("\n")
+	footer.WriteString(mutedNumberStyle.Render("Sort: "))
+	footer.WriteString(accentStyle.Render(m.sortMode.String()))
+	footer.WriteString(mutedNumberStyle.Render(" " + sortIcon + " " + sortDir))
 
-	return footerStyle.Render(footer)
+	return footerStyle.Render(footer.String())
 }
 
 // sortFiles sorts the files based on the current sort mode and direction
@@ -283,7 +321,8 @@ func Run(stats *model.Stats) error {
 	m := NewModel(stats)
 	m.sortFiles() // Initial sort
 
-	p := tea.NewProgram(m)
+	// Use alternate screen for proper interactive TUI
+	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
 	return err
 }
