@@ -77,7 +77,7 @@ ext:
 
 ## License
 
-MIT
+[MIT License](LICENSE)
 
 
 made with ❤️ by [@nodelike](https://nodelike.com/)
