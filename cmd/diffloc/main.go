@@ -34,7 +34,7 @@ var rootCmd = &cobra.Command{
 	Short: "Diff Line Counter - analyze lines of code changes",
 	Long: `diffloc is a tool for analyzing lines of code in your projects,
 with special support for Git repositories to show changed vs unchanged files.`,
-	Version: "1.0.4",
+	Version: "1.0.5",
 }
 
 var analyzeCmd = &cobra.Command{
@@ -49,7 +49,6 @@ showing changes and statistics.`,
 func init() {
 	cobra.OnInitialize(initConfig)
 
-	// Global flags
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is .diffloc.yaml)")
 
 	// Add all flags to both root and analyze commands so they work either way
@@ -64,7 +63,6 @@ func init() {
 		cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output results as JSON")
 		cmd.Flags().IntVar(&maxDepth, "max-depth", 0, "Maximum directory traversal depth (0 = unlimited)")
 
-		// Bind flags to viper
 		viper.BindPFlag("no-gitignore", cmd.Flags().Lookup("no-gitignore"))
 		viper.BindPFlag("exclude-tests", cmd.Flags().Lookup("exclude-tests"))
 		viper.BindPFlag("exclude", cmd.Flags().Lookup("exclude"))
@@ -72,15 +70,11 @@ func init() {
 		viper.BindPFlag("max-depth", cmd.Flags().Lookup("max-depth"))
 	}
 
-	// Add flags to analyze command
 	addAnalyzeFlags(analyzeCmd)
-
-	// Add flags to root command for default behavior
 	addAnalyzeFlags(rootCmd)
 
 	rootCmd.AddCommand(analyzeCmd)
 
-	// Make analyze the default command
 	rootCmd.Run = analyzeCmd.Run
 }
 
@@ -88,7 +82,6 @@ func initConfig() {
 	if cfgFile != "" {
 		viper.SetConfigFile(cfgFile)
 	} else {
-		// Search for config in current directory
 		viper.AddConfigPath(".")
 		viper.SetConfigType("yaml")
 		viper.SetConfigName(".diffloc")
@@ -96,21 +89,18 @@ func initConfig() {
 
 	viper.AutomaticEnv()
 
-	// Read config file if it exists
 	if err := viper.ReadInConfig(); err == nil {
 		fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())
 	}
 }
 
 func runAnalyze(cmd *cobra.Command, args []string) {
-	// Get path from args or use current directory
 	if len(args) > 0 {
 		path = args[0]
 	} else {
 		path = "."
 	}
 
-	// Get working directory if path is relative
 	if path == "." {
 		var err error
 		path, err = os.Getwd()
@@ -120,18 +110,15 @@ func runAnalyze(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// Safety check: validate the path is safe to analyze
 	if err := analyzer.ValidatePath(path); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Warn about potentially large directories
 	if shouldWarn, warning := analyzer.ShouldWarnLargeDirectory(path); shouldWarn {
 		fmt.Fprintln(os.Stderr, warning)
 	}
 
-	// Start CPU profiling if requested
 	if cpuProfile != "" {
 		f, err := os.Create(cpuProfile)
 		if err != nil {
@@ -146,7 +133,6 @@ func runAnalyze(cmd *cobra.Command, args []string) {
 		defer pprof.StopCPUProfile()
 	}
 
-	// Merge flags with config file values
 	if !cmd.Flags().Changed("no-gitignore") {
 		noGitignore = viper.GetBool("no-gitignore")
 	}
@@ -163,10 +149,8 @@ func runAnalyze(cmd *cobra.Command, args []string) {
 		maxDepth = viper.GetInt("max-depth")
 	}
 
-	// Create filter
 	filter := analyzer.NewFilter(allowedExts, customExcludes, !noGitignore, excludeTests)
 
-	// Load gitignore if in a git repo and respecting gitignore
 	if !noGitignore && analyzer.IsGitRepo(path) {
 		repoRoot, err := analyzer.GetRepoRoot(path)
 		if err == nil {
@@ -174,11 +158,9 @@ func runAnalyze(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// Create context with cancellation support
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Handle interrupt signals
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
@@ -187,7 +169,6 @@ func runAnalyze(cmd *cobra.Command, args []string) {
 		cancel()
 	}()
 
-	// Analyze the directory
 	stats, err := analyzer.Analyze(ctx, path, filter)
 	if err != nil {
 		if err == context.Canceled {
@@ -198,9 +179,7 @@ func runAnalyze(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// Output results
 	if jsonOutput {
-		// JSON output
 		output, err := json.MarshalIndent(stats, "", "  ")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: failed to marshal JSON: %v\n", err)
@@ -208,20 +187,17 @@ func runAnalyze(cmd *cobra.Command, args []string) {
 		}
 		fmt.Println(string(output))
 	} else if staticOutput {
-		// Static output (same format as TUI, but no interactivity)
 		if err := ui.PrintStatic(stats); err != nil {
 			fmt.Fprintf(os.Stderr, "Error printing output: %v\n", err)
 			os.Exit(1)
 		}
 	} else {
-		// Interactive TUI
 		if err := ui.Run(stats); err != nil {
 			fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
 			os.Exit(1)
 		}
 	}
 
-	// Write memory profile if requested
 	if memProfile != "" {
 		f, err := os.Create(memProfile)
 		if err != nil {

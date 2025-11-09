@@ -1,5 +1,7 @@
 # diffloc
 
+![Preview](assets/preview.png)
+
 Git diff & line count statistics with a clean TUI. Shows line counts, additions, and deletions for your codebase. Works in non-git repos too.
 
 ## Features

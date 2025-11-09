@@ -18,7 +18,6 @@ func AnalyzeFiles(ctx context.Context, rootPath string, filter *Filter) (*model.
 		UnchangedFiles: make([]*model.FileInfo, 0),
 	}
 
-	// Collect file paths first
 	type fileJob struct {
 		fullPath string
 		relPath  string
@@ -28,12 +27,10 @@ func AnalyzeFiles(ctx context.Context, rootPath string, filter *Filter) (*model.
 	
 	err := filepath.WalkDir(rootPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil // Skip files with errors
+			return nil
 		}
 
-		// Skip directories
 		if d.IsDir() {
-			// Check if directory should be excluded
 			relPath, _ := filepath.Rel(rootPath, path)
 			if relPath != "." && !filter.ShouldInclude(relPath+"/dummy.go") {
 				return filepath.SkipDir
@@ -41,13 +38,11 @@ func AnalyzeFiles(ctx context.Context, rootPath string, filter *Filter) (*model.
 			return nil
 		}
 
-		// Get relative path
 		relPath, err := filepath.Rel(rootPath, path)
 		if err != nil {
 			return nil
 		}
 
-		// Check if file should be included
 		if !filter.ShouldInclude(relPath) {
 			return nil
 		}
@@ -60,12 +55,10 @@ func AnalyzeFiles(ctx context.Context, rootPath string, filter *Filter) (*model.
 		return nil, err
 	}
 
-	// Process files in parallel
 	var statsMu sync.Mutex
 	eg, egCtx := errgroup.WithContext(ctx)
-	eg.SetLimit(16) // Limit concurrent workers
+	eg.SetLimit(16)
 
-	// Show progress bar for large repos
 	totalFiles := len(fileJobs)
 	var bar *progressbar.ProgressBar
 	if totalFiles > 1000 {
@@ -80,18 +73,17 @@ func AnalyzeFiles(ctx context.Context, rootPath string, filter *Filter) (*model.
 	}
 
 	for _, job := range fileJobs {
-		job := job // Capture loop variable
+		job := job
 		eg.Go(func() error {
-			// Check for context cancellation
 			select {
 			case <-egCtx.Done():
 				return egCtx.Err()
 			default:
 			}
-			// Count lines
+			
 			lines, err := CountLines(job.fullPath)
 			if err != nil {
-				return nil // Skip files with errors
+				return nil
 			}
 
 			fileInfo := &model.FileInfo{
