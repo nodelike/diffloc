@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] - 2025-11-09
+
+### Fixed
+- **Viewport scrolling now works properly** using `charmbracelet/bubbles/viewport`
+- Fixed terminal scrollback jumping issues with proper alt screen handling
+- Fixed header cropping when scrolling to top (adjusted footer height)
+- Fixed mouse escape sequences leaking into terminal prompt
+- Full output now prints to terminal after exiting interactive mode
+
+### Added
+- Mouse wheel scrolling support in interactive mode
+- Proper viewport integration for smooth scrolling experience
+
+### Changed
+- Replaced manual scroll logic with battle-tested viewport component
+- Cleaner code (110 lines removed)
+
 ## [1.0.3] - 2025-11-09
 
 ### Changed
