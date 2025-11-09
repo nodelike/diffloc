@@ -11,16 +11,18 @@ import (
 
 // Model represents the TUI state
 type Model struct {
-	stats    *model.Stats
-	sortMode model.SortMode
-	err      error
+	stats       *model.Stats
+	sortMode    model.SortMode
+	sortReverse bool // Track if numeric sort is reversed
+	err         error
 }
 
 // NewModel creates a new TUI model
 func NewModel(stats *model.Stats) Model {
 	return Model{
-		stats:    stats,
-		sortMode: model.SortByName,
+		stats:       stats,
+		sortMode:    model.SortByLines,
+		sortReverse: false, // Ascending by default
 	}
 }
 
@@ -34,19 +36,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "q", "ctrl+c":
+		case "q", "ctrl+c", "esc":
 			return m, tea.Quit
 		case "n":
-			m.sortMode = model.SortByName
+			if m.sortMode == model.SortByName {
+				m.sortReverse = !m.sortReverse
+			} else {
+				m.sortMode = model.SortByName
+				m.sortReverse = false
+			}
 			m.sortFiles()
 		case "l":
-			m.sortMode = model.SortByLines
+			if m.sortMode == model.SortByLines {
+				m.sortReverse = !m.sortReverse
+			} else {
+				m.sortMode = model.SortByLines
+				m.sortReverse = true // Default descending for numbers
+			}
 			m.sortFiles()
 		case "a":
-			m.sortMode = model.SortByAdditions
+			if m.sortMode == model.SortByAdditions {
+				m.sortReverse = !m.sortReverse
+			} else {
+				m.sortMode = model.SortByAdditions
+				m.sortReverse = true // Default descending for numbers
+			}
 			m.sortFiles()
 		case "d":
-			m.sortMode = model.SortByDeletions
+			if m.sortMode == model.SortByDeletions {
+				m.sortReverse = !m.sortReverse
+			} else {
+				m.sortMode = model.SortByDeletions
+				m.sortReverse = true // Default descending for numbers
+			}
 			m.sortFiles()
 		}
 	}
@@ -181,7 +203,7 @@ func (m Model) renderSummary() string {
 	// File counts
 	content.WriteString(summaryLabelStyle.Render("Total Files: "))
 	content.WriteString(summaryValueStyle.Render(fmt.Sprintf("%d", m.stats.TotalFiles)))
-	content.WriteString(summaryLabelStyle.Render(fmt.Sprintf(" (%d changed, %d unchanged)", 
+	content.WriteString(summaryLabelStyle.Render(fmt.Sprintf(" (%d changed, %d unchanged)",
 		m.stats.ChangedCount, m.stats.UnchangedCount)))
 	content.WriteString("\n")
 
@@ -202,8 +224,16 @@ func (m Model) renderSummary() string {
 
 // renderFooter renders the footer with keybindings
 func (m Model) renderFooter() string {
-	currentSort := fmt.Sprintf("(sorted by: %s)", m.sortMode.String())
-	
+	sortDir := ""
+	if m.sortMode != model.SortByName {
+		if m.sortReverse {
+			sortDir = " ↓"
+		} else {
+			sortDir = " ↑"
+		}
+	}
+	currentSort := fmt.Sprintf("(sorted by: %s%s)", m.sortMode.String(), sortDir)
+
 	keybindings := []string{
 		keybindingStyle.Render("n") + "=name",
 		keybindingStyle.Render("l") + "=lines",
@@ -218,22 +248,29 @@ func (m Model) renderFooter() string {
 	return footerStyle.Render(footer)
 }
 
-// sortFiles sorts the files based on the current sort mode
+// sortFiles sorts the files based on the current sort mode and direction
 func (m *Model) sortFiles() {
 	sortFunc := func(files []*model.FileInfo) {
 		sort.Slice(files, func(i, j int) bool {
+			var less bool
 			switch m.sortMode {
 			case model.SortByName:
-				return files[i].Path < files[j].Path
+				less = files[i].Path < files[j].Path
 			case model.SortByLines:
-				return files[i].Lines > files[j].Lines
+				less = files[i].Lines < files[j].Lines
 			case model.SortByAdditions:
-				return files[i].Additions > files[j].Additions
+				less = files[i].Additions < files[j].Additions
 			case model.SortByDeletions:
-				return files[i].Deletions > files[j].Deletions
+				less = files[i].Deletions < files[j].Deletions
 			default:
-				return files[i].Path < files[j].Path
+				less = files[i].Path < files[j].Path
 			}
+
+			// Reverse if needed (for numeric sorts, default is descending)
+			if m.sortReverse {
+				return !less
+			}
+			return less
 		})
 	}
 
@@ -250,4 +287,3 @@ func Run(stats *model.Stats) error {
 	_, err := p.Run()
 	return err
 }
-

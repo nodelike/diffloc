@@ -1,0 +1,25 @@
+# Example configuration file for diffloc
+# Place this file as .diffloc.yaml in your project root
+
+# Exclude test files by default
+exclude-tests: false
+
+# Respect .gitignore patterns
+no-gitignore: false
+
+# Custom exclusion patterns (regex)
+exclude:
+  - "vendor/"
+  - "node_modules/"
+  - "\\.pb\\.go$"
+
+# Allowed file extensions (overrides defaults)
+# Default extensions: .go, .py, .js, .jsx, .ts, .tsx, .vue, .svelte, .mjs, .cjs
+# ext:
+#   - ".go"
+#   - ".py"
+#   - ".js"
+
+# Maximum directory traversal depth (0 = unlimited)
+max-depth: 0
+
