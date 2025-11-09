@@ -29,7 +29,6 @@ func NewFilter(allowedExts []string, customExcludes []string, respectGitignore b
 		excludeTests:     excludeTests,
 	}
 
-	// Set allowed extensions (default if not provided)
 	if len(allowedExts) == 0 {
 		defaultExts := []string{".go", ".py", ".js", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".mjs", ".cjs"}
 		for _, ext := range defaultExts {
@@ -44,9 +43,7 @@ func NewFilter(allowedExts []string, customExcludes []string, respectGitignore b
 		}
 	}
 
-	// Always excluded patterns (regardless of flags)
 	alwaysExclude := []string{
-		// Common directories
 		`(^|/)node_modules($|/)`,
 		`(^|/)venv($|/)`,
 		`(^|/)\.venv($|/)`,
@@ -61,22 +58,17 @@ func NewFilter(allowedExts []string, customExcludes []string, respectGitignore b
 		`(^|/)vendor($|/)`,
 		`(^|/)bin($|/)`,
 		`(^|/)tmp($|/)`,
-		// Lock files
 		`\.lock$`,
 		`-lock\.json$`,
 		`-lock\.yaml$`,
 		`Pipfile\.lock$`,
 		`\.gitignore$`,
-		// Binaries
 		`\.exe$`,
 		`\.so$`,
 		`\.dylib$`,
 		`\.dll$`,
-		// Generated files
 		`_templ\.go$`,
-		// Images
 		`\.(jpg|jpeg|png|gif|bmp|svg|ico|webp|tiff|tif|psd|raw|heic|avif)$`,
-		// Python-specific
 		`\.pyc$`,
 		`\.pyo$`,
 		`\.pyd$`,
@@ -84,10 +76,8 @@ func NewFilter(allowedExts []string, customExcludes []string, respectGitignore b
 		`(^|/)\.eggs($|/)`,
 		`(^|/)\.pytest_cache($|/)`,
 		`(^|/)\.mypy_cache($|/)`,
-		// Golang-specific  
 		`\.pb\.go$`,
 		`_gen\.go$`,
-		// JS/Node-specific
 		`\.min\.js$`,
 		`\.bundle\.js$`,
 		`\.eslintcache`,
@@ -98,7 +88,6 @@ func NewFilter(allowedExts []string, customExcludes []string, respectGitignore b
 		`(^|/)jest-cache($|/)`,
 	}
 
-	// Test file patterns (conditionally excluded)
 	testPatterns := []string{
 		`_test\.go$`,
 		`(^|/)tests?($|/)`,
@@ -106,7 +95,6 @@ func NewFilter(allowedExts []string, customExcludes []string, respectGitignore b
 		`\.spec\.(js|ts|jsx|tsx)$`,
 	}
 
-	// Combine patterns
 	allPatterns := alwaysExclude
 	if f.excludeTests {
 		allPatterns = append(allPatterns, testPatterns...)
@@ -132,7 +120,6 @@ func (f *Filter) LoadGitignore(repoRoot string) error {
 	gitignorePath := filepath.Join(repoRoot, ".gitignore")
 	file, err := os.Open(gitignorePath)
 	if err != nil {
-		// No .gitignore is fine
 		return nil
 	}
 	defer file.Close()
@@ -141,33 +128,26 @@ func (f *Filter) LoadGitignore(repoRoot string) error {
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		
-		// Skip empty lines and comments
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
 
-		// Convert gitignore pattern to glob pattern
 		pattern := line
 		
-		// Handle negation (we'll just skip these for simplicity)
 		if strings.HasPrefix(pattern, "!") {
 			continue
 		}
 
-		// Handle directory patterns
 		if strings.HasSuffix(pattern, "/") {
 			pattern = pattern + "**"
 		}
 
-		// Handle patterns starting with /
 		if strings.HasPrefix(pattern, "/") {
 			pattern = strings.TrimPrefix(pattern, "/")
 		} else {
-			// Patterns without / should match anywhere
 			pattern = "**/" + pattern
 		}
 
-		// Compile glob pattern
 		if g, err := glob.Compile(pattern, '/'); err == nil {
 			f.gitignoreGlobs = append(f.gitignoreGlobs, g)
 		}
@@ -178,17 +158,14 @@ func (f *Filter) LoadGitignore(repoRoot string) error {
 
 // ShouldInclude checks if a file should be included based on all filters
 func (f *Filter) ShouldInclude(path string) bool {
-	// Normalize path separators
 	path = filepath.ToSlash(path)
 
-	// Check always-excluded patterns first
 	for _, re := range f.excludePatterns {
 		if re.MatchString(path) {
 			return false
 		}
 	}
 
-	// Check gitignore patterns
 	if f.respectGitignore {
 		for _, g := range f.gitignoreGlobs {
 			if g.Match(path) {
@@ -197,7 +174,6 @@ func (f *Filter) ShouldInclude(path string) bool {
 		}
 	}
 
-	// Check if extension is allowed
 	ext := filepath.Ext(path)
 	if ext == "" || !f.allowedExts[ext] {
 		return false
@@ -223,10 +199,8 @@ func CountLines(filePath string) (int, error) {
 	for {
 		n, err := file.Read(buf)
 		if n > 0 {
-			// Binary file detection on first chunk
 			if firstChunk {
 				if bytes.IndexByte(buf[:n], 0) != -1 {
-					// Contains null byte - likely binary file
 					return 0, nil
 				}
 				firstChunk = false

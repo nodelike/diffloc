@@ -19,7 +19,6 @@ func NewGitAnalyzer() *GitAnalyzer {
 	return &GitAnalyzer{}
 }
 
-// Analyze implements the Analyzer interface for Git repositories
 func (g *GitAnalyzer) Analyze(ctx context.Context, rootPath string, filter *Filter) (*model.Stats, error) {
 	return AnalyzeGit(ctx, rootPath, filter)
 }
@@ -27,12 +26,10 @@ func (g *GitAnalyzer) Analyze(ctx context.Context, rootPath string, filter *Filt
 // FileAnalyzer implements Analyzer for non-Git directories
 type FileAnalyzer struct{}
 
-// NewFileAnalyzer creates a new FileAnalyzer
 func NewFileAnalyzer() *FileAnalyzer {
 	return &FileAnalyzer{}
 }
 
-// Analyze implements the Analyzer interface for non-Git directories
 func (f *FileAnalyzer) Analyze(ctx context.Context, rootPath string, filter *Filter) (*model.Stats, error) {
 	return AnalyzeFiles(ctx, rootPath, filter)
 }
