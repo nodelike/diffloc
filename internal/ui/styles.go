@@ -4,17 +4,17 @@ import "github.com/charmbracelet/lipgloss"
 
 var (
 	// Modern color palette - using hex colors for better consistency
-	primaryColor     = lipgloss.Color("#7C3AED")   // Vibrant purple
-	accentColor      = lipgloss.Color("#06B6D4")   // Cyan blue
-	successColor     = lipgloss.Color("#10B981")   // Modern green
-	errorColor       = lipgloss.Color("#EF4444")   // Modern red
-	warningColor     = lipgloss.Color("#F59E0B")   // Amber
-	mutedColor       = lipgloss.Color("#6B7280")   // Neutral gray
-	lightMutedColor  = lipgloss.Color("#9CA3AF")   // Light gray
-	textColor        = lipgloss.Color("#F9FAFB")   // Off-white
-	highlightColor   = lipgloss.Color("#EC4899")   // Pink
-	borderColor      = lipgloss.Color("#4B5563")   // Dark gray
-	backgroundColor  = lipgloss.Color("#1F2937")   // Dark background
+	primaryColor    = lipgloss.Color("#AF87FF") // Vibrant purple
+	accentColor     = lipgloss.Color("#06B6D4") // Cyan blue
+	successColor    = lipgloss.Color("#10B981") // Modern green
+	errorColor      = lipgloss.Color("#EF4444") // Modern red
+	warningColor    = lipgloss.Color("#F59E0B") // Amber
+	mutedColor      = lipgloss.Color("#6B7280") // Neutral gray
+	lightMutedColor = lipgloss.Color("#9CA3AF") // Light gray
+	textColor       = lipgloss.Color("#F9FAFB") // Off-white
+	highlightColor  = lipgloss.Color("#EC4899") // Pink
+	borderColor     = lipgloss.Color("#4B5563") // Dark gray
+	backgroundColor = lipgloss.Color("#1F2937") // Dark background
 
 	// Title style - main app header
 	titleStyle = lipgloss.NewStyle().
@@ -140,4 +140,3 @@ var (
 			Padding(0, 1).
 			MarginRight(1)
 )
-
