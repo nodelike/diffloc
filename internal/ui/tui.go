@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/nodelike/diffloc/internal/model"
 )
@@ -39,7 +39,7 @@ func (m Model) Init() tea.Cmd {
 // Update handles messages and updates the model
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
-	
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		headerHeight := 3
@@ -54,12 +54,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.Width = msg.Width
 			m.viewport.Height = msg.Height - headerHeight
 		}
-		
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "ctrl+c", "esc":
 			return m, tea.Quit
-			
+
 		// Sorting controls
 		case "n":
 			if m.sortMode == model.SortByName {
@@ -107,7 +107,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	
+
 	// Pass through to viewport for scrolling
 	m.viewport, cmd = m.viewport.Update(msg)
 	return m, cmd
@@ -125,7 +125,7 @@ func (m Model) View() string {
 
 	// Render viewport and footer
 	isGitRepo := m.stats.TotalAdditions > 0 || m.stats.TotalDeletions > 0 || m.stats.ChangedCount > 0
-	
+
 	return fmt.Sprintf("%s\n%s\n", m.viewport.View(), m.renderFooter(isGitRepo))
 }
 
@@ -408,8 +408,13 @@ func Run(stats *model.Stats) error {
 	m := NewModel(stats)
 	m.sortFiles() // Initial sort
 
-	// Use alternate screen for proper interactive TUI
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	// Use alternate screen for clean TUI experience
+	p := tea.NewProgram(
+		m,
+		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
+	)
+	
 	_, err := p.Run()
 	return err
 }
