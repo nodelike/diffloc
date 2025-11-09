@@ -18,7 +18,8 @@ Git diff & line count statistics with a clean TUI. Shows line counts, additions,
 ## Installation
 ```bash
 # Homebrew
-brew install nodelike/tap/diffloc
+brew tap nodelike/tap
+brew install diffloc
 
 # Go
 go install github.com/nodelike/diffloc/cmd/diffloc@latest
