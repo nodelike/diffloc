@@ -24,7 +24,8 @@ var (
 	path           string
 	cpuProfile     string
 	memProfile     string
-	noTUI          bool
+	staticOutput   bool
+	jsonOutput     bool
 	maxDepth       int
 )
 
@@ -51,25 +52,34 @@ func init() {
 	// Global flags
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is .diffloc.yaml)")
 
-	// Analyze command flags
-	analyzeCmd.Flags().BoolVar(&noGitignore, "no-gitignore", false, "Ignore .gitignore patterns (always-excluded patterns still apply)")
-	analyzeCmd.Flags().BoolVar(&excludeTests, "exclude-tests", false, "Exclude test files (_test.go, test/, tests/, *.test.*, *.spec.*)")
-	analyzeCmd.Flags().StringArrayVar(&customExcludes, "exclude", []string{}, "Additional exclusion pattern (can be repeated)")
-	analyzeCmd.Flags().StringArrayVar(&allowedExts, "ext", []string{}, "Override allowed file extensions (can be repeated)")
-	analyzeCmd.Flags().StringVar(&cpuProfile, "profile-cpu", "", "Write CPU profile to file")
-	analyzeCmd.Flags().StringVar(&memProfile, "profile-mem", "", "Write memory profile to file")
-	analyzeCmd.Flags().BoolVar(&noTUI, "no-tui", false, "Output JSON instead of running interactive UI")
-	analyzeCmd.Flags().IntVar(&maxDepth, "max-depth", 0, "Maximum directory traversal depth (0 = unlimited)")
+	// Add all flags to both root and analyze commands so they work either way
+	addAnalyzeFlags := func(cmd *cobra.Command) {
+		cmd.Flags().BoolVar(&noGitignore, "no-gitignore", false, "Ignore .gitignore patterns (always-excluded patterns still apply)")
+		cmd.Flags().BoolVar(&excludeTests, "exclude-tests", false, "Exclude test files (_test.go, test/, tests/, *.test.*, *.spec.*)")
+		cmd.Flags().StringArrayVar(&customExcludes, "exclude", []string{}, "Additional exclusion pattern (can be repeated)")
+		cmd.Flags().StringArrayVar(&allowedExts, "ext", []string{}, "Override allowed file extensions (can be repeated)")
+		cmd.Flags().StringVar(&cpuProfile, "profile-cpu", "", "Write CPU profile to file")
+		cmd.Flags().StringVar(&memProfile, "profile-mem", "", "Write memory profile to file")
+		cmd.Flags().BoolVar(&staticOutput, "static", false, "Print static output without interactive UI")
+		cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output results as JSON")
+		cmd.Flags().IntVar(&maxDepth, "max-depth", 0, "Maximum directory traversal depth (0 = unlimited)")
 
-	// Bind flags to viper
-	viper.BindPFlag("no-gitignore", analyzeCmd.Flags().Lookup("no-gitignore"))
-	viper.BindPFlag("exclude-tests", analyzeCmd.Flags().Lookup("exclude-tests"))
-	viper.BindPFlag("exclude", analyzeCmd.Flags().Lookup("exclude"))
-	viper.BindPFlag("ext", analyzeCmd.Flags().Lookup("ext"))
-	viper.BindPFlag("max-depth", analyzeCmd.Flags().Lookup("max-depth"))
+		// Bind flags to viper
+		viper.BindPFlag("no-gitignore", cmd.Flags().Lookup("no-gitignore"))
+		viper.BindPFlag("exclude-tests", cmd.Flags().Lookup("exclude-tests"))
+		viper.BindPFlag("exclude", cmd.Flags().Lookup("exclude"))
+		viper.BindPFlag("ext", cmd.Flags().Lookup("ext"))
+		viper.BindPFlag("max-depth", cmd.Flags().Lookup("max-depth"))
+	}
+
+	// Add flags to analyze command
+	addAnalyzeFlags(analyzeCmd)
+
+	// Add flags to root command for default behavior
+	addAnalyzeFlags(rootCmd)
 
 	rootCmd.AddCommand(analyzeCmd)
-	
+
 	// Make analyze the default command
 	rootCmd.Run = analyzeCmd.Run
 }
@@ -178,7 +188,7 @@ func runAnalyze(cmd *cobra.Command, args []string) {
 	}
 
 	// Output results
-	if noTUI {
+	if jsonOutput {
 		// JSON output
 		output, err := json.MarshalIndent(stats, "", "  ")
 		if err != nil {
@@ -186,8 +196,14 @@ func runAnalyze(cmd *cobra.Command, args []string) {
 			os.Exit(1)
 		}
 		fmt.Println(string(output))
+	} else if staticOutput {
+		// Static output (same format as TUI, but no interactivity)
+		if err := ui.PrintStatic(stats); err != nil {
+			fmt.Fprintf(os.Stderr, "Error printing output: %v\n", err)
+			os.Exit(1)
+		}
 	} else {
-		// Run TUI
+		// Interactive TUI
 		if err := ui.Run(stats); err != nil {
 			fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
 			os.Exit(1)

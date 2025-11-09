@@ -366,3 +366,62 @@ func Run(stats *model.Stats) error {
 	_, err := p.Run()
 	return err
 }
+
+// PrintStatic prints the output once without interactivity
+func PrintStatic(stats *model.Stats) error {
+	m := NewModel(stats)
+	m.sortFiles() // Initial sort
+	
+	// Print the view without footer (no interactivity needed)
+	fmt.Print(m.renderStatic())
+	return nil
+}
+
+// renderStatic renders the static view without footer
+func (m Model) renderStatic() string {
+	if m.err != nil {
+		return "\n" + errorStyle.Render(fmt.Sprintf("⚠️  Error: %v", m.err)) + "\n"
+	}
+
+	var b strings.Builder
+
+	// Header
+	b.WriteString("\n")
+	b.WriteString(headerStyle.Render("✨ diffloc — Diff Line Counter"))
+	b.WriteString("\n")
+
+	// Check if this is a git repo (has any changes tracked)
+	isGitRepo := m.stats.TotalAdditions > 0 || m.stats.TotalDeletions > 0 || m.stats.ChangedCount > 0
+
+	if isGitRepo {
+		// Git repo: Show changed and unchanged files separately
+		if len(m.stats.ChangedFiles) > 0 {
+			changedBadge := badgeStyle.Render(fmt.Sprintf("%d", len(m.stats.ChangedFiles)))
+			b.WriteString(sectionHeaderStyle.Render(changedBadge + " Changed Files"))
+			b.WriteString("\n")
+			b.WriteString(m.renderFileTable(m.stats.ChangedFiles, true, true))
+		}
+
+		if len(m.stats.UnchangedFiles) > 0 {
+			unchangedBadge := badgeStyle.Render(fmt.Sprintf("%d", len(m.stats.UnchangedFiles)))
+			b.WriteString(sectionHeaderStyle.Render(unchangedBadge + " Unchanged Files"))
+			b.WriteString("\n")
+			b.WriteString(m.renderFileTable(m.stats.UnchangedFiles, false, true))
+		}
+	} else {
+		// Non-git: Show all files in one section without git-specific columns
+		allFiles := append(m.stats.ChangedFiles, m.stats.UnchangedFiles...)
+		if len(allFiles) > 0 {
+			filesBadge := badgeStyle.Render(fmt.Sprintf("%d", len(allFiles)))
+			b.WriteString(sectionHeaderStyle.Render(filesBadge + " Files"))
+			b.WriteString("\n")
+			b.WriteString(m.renderFileTable(allFiles, false, false))
+		}
+	}
+
+	// Summary
+	b.WriteString(m.renderSummary(isGitRepo))
+	b.WriteString("\n")
+
+	return b.String()
+}
