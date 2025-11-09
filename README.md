@@ -189,13 +189,14 @@ When run outside a git repository:
 
 ## Contributing
 
-Contributions are welcome! Please:
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for:
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+- How to report bugs and suggest features
+- Development setup instructions
+- Coding standards and commit message format
+- Pull request process
+
+For Homebrew tap setup and release management, see [HOMEBREW_TAP_SETUP.md](HOMEBREW_TAP_SETUP.md).
 
 ## Roadmap
 
