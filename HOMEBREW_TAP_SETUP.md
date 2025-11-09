@@ -17,19 +17,13 @@ This guide explains how to set up the Homebrew tap for `diffloc` to enable autom
    - Make it public
    - Initialize with a README
 
-2. Clone the repository locally:
+2. Clone the repository locally (optional):
    ```bash
    git clone https://github.com/nodelike/homebrew-tap.git
    cd homebrew-tap
    ```
 
-3. Create the Formula directory:
-   ```bash
-   mkdir -p Formula
-   git add Formula
-   git commit -m "Initialize Formula directory"
-   git push origin main
-   ```
+   **Note:** You don't need to create the `Formula` directory manually. GoReleaser will automatically create it and push the formula file when you create your first release.
 
 ## Step 2: Configure GitHub Secrets
 
