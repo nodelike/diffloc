@@ -42,17 +42,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		headerHeight := 3
+		footerHeight := 6 // Reserve space for footer (2 lines + padding)
 		if !m.ready {
 			// Initialize viewport
-			m.viewport = viewport.New(msg.Width, msg.Height-headerHeight)
-			m.viewport.YPosition = headerHeight
+			m.viewport = viewport.New(msg.Width, msg.Height-footerHeight)
+			m.viewport.YPosition = 0
 			m.viewport.SetContent(m.renderFullContent())
 			m.viewport.GotoBottom() // Start at bottom
 			m.ready = true
 		} else {
 			m.viewport.Width = msg.Width
-			m.viewport.Height = msg.Height - headerHeight
+			m.viewport.Height = msg.Height - footerHeight
 		}
 
 	case tea.KeyMsg:
@@ -408,15 +408,23 @@ func Run(stats *model.Stats) error {
 	m := NewModel(stats)
 	m.sortFiles() // Initial sort
 
-	// Use alternate screen for clean TUI experience
+	// Use alt screen for clean TUI, then print static output after
 	p := tea.NewProgram(
 		m,
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
 	)
-	
-	_, err := p.Run()
-	return err
+
+	finalModel, err := p.Run()
+	if err != nil {
+		return err
+	}
+
+	// After TUI exits, print full static output to terminal
+	final := finalModel.(Model)
+	fmt.Print("\n")
+	fmt.Print(final.renderStatic())
+	return nil
 }
 
 // PrintStatic prints the output once without interactivity
