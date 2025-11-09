@@ -89,86 +89,109 @@ func (m Model) View() string {
 	b.WriteString(headerStyle.Render("✨ diffloc — Diff Line Counter"))
 	b.WriteString("\n")
 
-	// Changed files section
-	if len(m.stats.ChangedFiles) > 0 {
-		changedBadge := badgeStyle.Render(fmt.Sprintf("%d", len(m.stats.ChangedFiles)))
-		b.WriteString(sectionHeaderStyle.Render(changedBadge + " Changed Files"))
-		b.WriteString("\n")
-		b.WriteString(m.renderFileTable(m.stats.ChangedFiles, true))
-	}
+	// Check if this is a git repo (has any changes tracked)
+	isGitRepo := m.stats.TotalAdditions > 0 || m.stats.TotalDeletions > 0 || m.stats.ChangedCount > 0
 
-	// Unchanged files section
-	if len(m.stats.UnchangedFiles) > 0 {
-		unchangedBadge := badgeStyle.Render(fmt.Sprintf("%d", len(m.stats.UnchangedFiles)))
-		b.WriteString(sectionHeaderStyle.Render(unchangedBadge + " Unchanged Files"))
-		b.WriteString("\n")
-		b.WriteString(m.renderFileTable(m.stats.UnchangedFiles, false))
+	if isGitRepo {
+		// Git repo: Show changed and unchanged files separately
+		if len(m.stats.ChangedFiles) > 0 {
+			changedBadge := badgeStyle.Render(fmt.Sprintf("%d", len(m.stats.ChangedFiles)))
+			b.WriteString(sectionHeaderStyle.Render(changedBadge + " Changed Files"))
+			b.WriteString("\n")
+			b.WriteString(m.renderFileTable(m.stats.ChangedFiles, true, true))
+		}
+
+		if len(m.stats.UnchangedFiles) > 0 {
+			unchangedBadge := badgeStyle.Render(fmt.Sprintf("%d", len(m.stats.UnchangedFiles)))
+			b.WriteString(sectionHeaderStyle.Render(unchangedBadge + " Unchanged Files"))
+			b.WriteString("\n")
+			b.WriteString(m.renderFileTable(m.stats.UnchangedFiles, false, true))
+		}
+	} else {
+		// Non-git: Show all files in one section without git-specific columns
+		allFiles := append(m.stats.ChangedFiles, m.stats.UnchangedFiles...)
+		if len(allFiles) > 0 {
+			filesBadge := badgeStyle.Render(fmt.Sprintf("%d", len(allFiles)))
+			b.WriteString(sectionHeaderStyle.Render(filesBadge + " Files"))
+			b.WriteString("\n")
+			b.WriteString(m.renderFileTable(allFiles, false, false))
+		}
 	}
 
 	// Summary
-	b.WriteString(m.renderSummary())
+	b.WriteString(m.renderSummary(isGitRepo))
 
 	// Footer with keybindings
-	b.WriteString(m.renderFooter())
+	b.WriteString(m.renderFooter(isGitRepo))
 	b.WriteString("\n")
 
 	return b.String()
 }
 
 // renderFileTable renders a table of files
-func (m Model) renderFileTable(files []*model.FileInfo, isChanged bool) string {
+func (m Model) renderFileTable(files []*model.FileInfo, isChanged bool, showGitColumns bool) string {
 	if len(files) == 0 {
 		return mutedNumberStyle.Render("    (none)") + "\n"
 	}
 
 	var b strings.Builder
 
-	// Table header with better spacing
+	// Table header
 	b.WriteString("    ")
 	b.WriteString(tableHeaderStyle.Render(fmt.Sprintf("%-10s", "LINES")))
 	b.WriteString("  ")
-	b.WriteString(tableHeaderStyle.Render(fmt.Sprintf("%-10s", "ADDED")))
-	b.WriteString("  ")
-	b.WriteString(tableHeaderStyle.Render(fmt.Sprintf("%-10s", "REMOVED")))
-	b.WriteString("  ")
+	
+	if showGitColumns {
+		b.WriteString(tableHeaderStyle.Render(fmt.Sprintf("%-10s", "ADDED")))
+		b.WriteString("  ")
+		b.WriteString(tableHeaderStyle.Render(fmt.Sprintf("%-10s", "REMOVED")))
+		b.WriteString("  ")
+	}
+	
 	b.WriteString(tableHeaderStyle.Render("FILE PATH"))
 	b.WriteString("\n")
 
 	// Separator line
 	b.WriteString("    ")
-	b.WriteString(separatorStyle.Render(strings.Repeat("─", 90)))
+	sepLength := 90
+	if !showGitColumns {
+		sepLength = 60
+	}
+	b.WriteString(separatorStyle.Render(strings.Repeat("─", sepLength)))
 	b.WriteString("\n")
 
 	// File rows
 	for _, file := range files {
 		b.WriteString("    ")
 
-		// Lines count - same style for all files
+		// Lines count
 		linesStr := fmt.Sprintf("%-10d", file.Lines)
 		b.WriteString(summaryValueStyle.Render(linesStr))
 		b.WriteString("  ")
 
-		// Additions with visual indicator
-		if file.Additions > 0 {
-			addStr := fmt.Sprintf("+%-9d", file.Additions)
-			b.WriteString(additionStyle.Render(addStr))
-		} else {
-			b.WriteString(mutedNumberStyle.Render(fmt.Sprintf("%-10s", "—")))
-		}
-		b.WriteString("  ")
+		if showGitColumns {
+			// Additions with visual indicator
+			if file.Additions > 0 {
+				addStr := fmt.Sprintf("+%-9d", file.Additions)
+				b.WriteString(additionStyle.Render(addStr))
+			} else {
+				b.WriteString(mutedNumberStyle.Render(fmt.Sprintf("%-10s", "—")))
+			}
+			b.WriteString("  ")
 
-		// Deletions with visual indicator
-		if file.Deletions > 0 {
-			delStr := fmt.Sprintf("-%-9d", file.Deletions)
-			b.WriteString(deletionStyle.Render(delStr))
-		} else {
-			b.WriteString(mutedNumberStyle.Render(fmt.Sprintf("%-10s", "—")))
+			// Deletions with visual indicator
+			if file.Deletions > 0 {
+				delStr := fmt.Sprintf("-%-9d", file.Deletions)
+				b.WriteString(deletionStyle.Render(delStr))
+			} else {
+				b.WriteString(mutedNumberStyle.Render(fmt.Sprintf("%-10s", "—")))
+			}
+			b.WriteString("  ")
 		}
-		b.WriteString("  ")
 
 		// File path with visual indicator
 		pathPrefix := ""
-		if isChanged {
+		if isChanged && showGitColumns {
 			if file.Additions > 0 && file.Deletions > 0 {
 				pathPrefix = "◆ " // Modified
 			} else if file.Additions > 0 {
@@ -185,7 +208,7 @@ func (m Model) renderFileTable(files []*model.FileInfo, isChanged bool) string {
 }
 
 // renderSummary renders the summary box
-func (m Model) renderSummary() string {
+func (m Model) renderSummary(isGitRepo bool) string {
 	var content strings.Builder
 
 	// Title
@@ -194,70 +217,87 @@ func (m Model) renderSummary() string {
 	content.WriteString(separatorStyle.Render(strings.Repeat("─", 60)))
 	content.WriteString("\n")
 
-	// Net change with visual indicator
-	netChangeStr := ""
-	netChangeIcon := ""
-	netChangeStyle := summaryNeutralStyle
-	if m.stats.NetChange > 0 {
-		netChangeIcon = "▲"
-		netChangeStr = fmt.Sprintf("+%d lines", m.stats.NetChange)
-		netChangeStyle = summaryPositiveStyle
-	} else if m.stats.NetChange < 0 {
-		netChangeIcon = "▼"
-		netChangeStr = fmt.Sprintf("%d lines", m.stats.NetChange)
-		netChangeStyle = summaryNegativeStyle
+	if isGitRepo {
+		// Git repo: Show net change
+		netChangeStr := ""
+		netChangeIcon := ""
+		netChangeStyle := summaryNeutralStyle
+		if m.stats.NetChange > 0 {
+			netChangeIcon = "▲"
+			netChangeStr = fmt.Sprintf("+%d lines", m.stats.NetChange)
+			netChangeStyle = summaryPositiveStyle
+		} else if m.stats.NetChange < 0 {
+			netChangeIcon = "▼"
+			netChangeStr = fmt.Sprintf("%d lines", m.stats.NetChange)
+			netChangeStyle = summaryNegativeStyle
+		} else {
+			netChangeIcon = "●"
+			netChangeStr = "no change"
+			netChangeStyle = summaryNeutralStyle
+		}
+
+		content.WriteString(summaryLabelStyle.Render("Net Change:"))
+		content.WriteString("  ")
+		content.WriteString(netChangeStyle.Render(netChangeIcon + " " + netChangeStr))
+		content.WriteString("\n")
+
+		// File counts with changed/unchanged breakdown
+		accentStyle := lipgloss.NewStyle().Foreground(accentColor).Bold(true)
+		content.WriteString(summaryLabelStyle.Render("Files:"))
+		content.WriteString("       ")
+		content.WriteString(summaryValueStyle.Render(fmt.Sprintf("%d", m.stats.TotalFiles)))
+		content.WriteString(summaryLabelStyle.Render(" total  •  "))
+		content.WriteString(accentStyle.Render(fmt.Sprintf("%d", m.stats.ChangedCount)))
+		content.WriteString(summaryLabelStyle.Render(" changed  •  "))
+		content.WriteString(mutedNumberStyle.Render(fmt.Sprintf("%d", m.stats.UnchangedCount)))
+		content.WriteString(summaryLabelStyle.Render(" unchanged"))
+		content.WriteString("\n")
+
+		// Line counts
+		content.WriteString(summaryLabelStyle.Render("Total Lines:"))
+		content.WriteString(" ")
+		content.WriteString(summaryValueStyle.Render(fmt.Sprintf("%d", m.stats.TotalLines)))
+		content.WriteString("\n")
+
+		// Changes breakdown
+		content.WriteString(summaryLabelStyle.Render("Changes:"))
+		content.WriteString("    ")
+		content.WriteString(additionStyle.Render(fmt.Sprintf("+%d", m.stats.TotalAdditions)))
+		content.WriteString(summaryLabelStyle.Render(" added  •  "))
+		content.WriteString(deletionStyle.Render(fmt.Sprintf("-%d", m.stats.TotalDeletions)))
+		content.WriteString(summaryLabelStyle.Render(" removed"))
 	} else {
-		netChangeIcon = "●"
-		netChangeStr = "no change"
-		netChangeStyle = summaryNeutralStyle
+		// Non-git: Simple summary
+		content.WriteString(summaryLabelStyle.Render("Total Files:"))
+		content.WriteString(" ")
+		content.WriteString(summaryValueStyle.Render(fmt.Sprintf("%d", m.stats.TotalFiles)))
+		content.WriteString("\n")
+		content.WriteString(summaryLabelStyle.Render("Total Lines:"))
+		content.WriteString(" ")
+		content.WriteString(summaryValueStyle.Render(fmt.Sprintf("%d", m.stats.TotalLines)))
 	}
-
-	content.WriteString(summaryLabelStyle.Render("Net Change:"))
-	content.WriteString("  ")
-	content.WriteString(netChangeStyle.Render(netChangeIcon + " " + netChangeStr))
-	content.WriteString("\n")
-
-	// File counts
-	accentStyle := lipgloss.NewStyle().Foreground(accentColor).Bold(true)
-	content.WriteString(summaryLabelStyle.Render("Files:"))
-	content.WriteString("       ")
-	content.WriteString(summaryValueStyle.Render(fmt.Sprintf("%d", m.stats.TotalFiles)))
-	content.WriteString(summaryLabelStyle.Render(" total  •  "))
-	content.WriteString(accentStyle.Render(fmt.Sprintf("%d", m.stats.ChangedCount)))
-	content.WriteString(summaryLabelStyle.Render(" changed  •  "))
-	content.WriteString(mutedNumberStyle.Render(fmt.Sprintf("%d", m.stats.UnchangedCount)))
-	content.WriteString(summaryLabelStyle.Render(" unchanged"))
-	content.WriteString("\n")
-
-	// Line counts
-	content.WriteString(summaryLabelStyle.Render("Total Lines:"))
-	content.WriteString(" ")
-	content.WriteString(summaryValueStyle.Render(fmt.Sprintf("%d", m.stats.TotalLines)))
-	content.WriteString("\n")
-
-	// Changes breakdown
-	content.WriteString(summaryLabelStyle.Render("Changes:"))
-	content.WriteString("    ")
-	content.WriteString(additionStyle.Render(fmt.Sprintf("+%d", m.stats.TotalAdditions)))
-	content.WriteString(summaryLabelStyle.Render(" added  •  "))
-	content.WriteString(deletionStyle.Render(fmt.Sprintf("-%d", m.stats.TotalDeletions)))
-	content.WriteString(summaryLabelStyle.Render(" removed"))
 
 	return summaryBoxStyle.Render(content.String())
 }
 
 // renderFooter renders the footer with keybindings
-func (m Model) renderFooter() string {
+func (m Model) renderFooter(isGitRepo bool) string {
 	var footer strings.Builder
 
 	// Keybindings
 	keybindings := []string{
 		keybindingKeyStyle.Render("n") + " " + keybindingDescStyle.Render("name"),
 		keybindingKeyStyle.Render("l") + " " + keybindingDescStyle.Render("lines"),
-		keybindingKeyStyle.Render("a") + " " + keybindingDescStyle.Render("additions"),
-		keybindingKeyStyle.Render("d") + " " + keybindingDescStyle.Render("deletions"),
-		keybindingKeyStyle.Render("q") + " " + keybindingDescStyle.Render("quit"),
 	}
+	
+	if isGitRepo {
+		keybindings = append(keybindings,
+			keybindingKeyStyle.Render("a") + " " + keybindingDescStyle.Render("additions"),
+			keybindingKeyStyle.Render("d") + " " + keybindingDescStyle.Render("deletions"),
+		)
+	}
+	
+	keybindings = append(keybindings, keybindingKeyStyle.Render("q") + " " + keybindingDescStyle.Render("quit"))
 
 	footer.WriteString(strings.Join(keybindings, separatorStyle.Render("  •  ")))
 
