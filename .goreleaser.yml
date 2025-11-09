@@ -55,6 +55,7 @@ brews:
       owner: nodelike
       name: homebrew-tap
       branch: main
+      token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
     commit_author:
       name: goreleaserbot
       email: bot@goreleaser.com
