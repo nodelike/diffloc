@@ -111,7 +111,9 @@ func AnalyzeGit(ctx context.Context, rootPath string, filter *Filter) (*model.St
 			case job.fileStatus.Staging == git.Untracked || job.fileStatus.Worktree == git.Untracked:
 				fileInfo.Additions = lines
 			case job.fileStatus.Worktree == git.Deleted || job.fileStatus.Staging == git.Deleted:
-				fileInfo.Deletions = lines
+				// For deleted files, count lines from HEAD commit
+				deletedLines := countLinesFromCommit(headTree, job.path)
+				fileInfo.Deletions = deletedLines
 				fileInfo.Lines = 0
 			default:
 				additions, deletions := calculateDiffNative(repo, headCommit, job.path)
@@ -296,6 +298,31 @@ func computeLineDiff(oldLines, newLines []string) (additions, deletions int) {
 	}
 
 	return additions, deletions
+}
+
+// countLinesFromCommit counts lines in a file from a commit tree
+func countLinesFromCommit(tree *object.Tree, path string) int {
+	file, err := tree.File(path)
+	if err != nil {
+		return 0
+	}
+
+	content, err := file.Contents()
+	if err != nil {
+		return 0
+	}
+
+	if len(content) == 0 {
+		return 0
+	}
+
+	lines := strings.Split(content, "\n")
+	// If the file doesn't end with a newline, we still have the right count
+	// If it does end with a newline, Split will create an empty string at the end
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		return len(lines) - 1
+	}
+	return len(lines)
 }
 
 // IsGitRepo checks if the given path is a git repository
