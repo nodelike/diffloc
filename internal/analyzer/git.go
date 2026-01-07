@@ -53,6 +53,7 @@ func AnalyzeGit(ctx context.Context, rootPath string, filter *Filter) (*model.St
 
 	changedPaths := make(map[string]bool)
 	var statsMu sync.Mutex
+	var gitMu sync.Mutex // Protects concurrent access to git repository objects
 
 	type changedFileJob struct {
 		path       string
@@ -112,11 +113,15 @@ func AnalyzeGit(ctx context.Context, rootPath string, filter *Filter) (*model.St
 				fileInfo.Additions = lines
 			case job.fileStatus.Worktree == git.Deleted || job.fileStatus.Staging == git.Deleted:
 				// For deleted files, count lines from HEAD commit
+				gitMu.Lock()
 				deletedLines := countLinesFromCommit(headTree, job.path)
+				gitMu.Unlock()
 				fileInfo.Deletions = deletedLines
 				fileInfo.Lines = 0
 			default:
+				gitMu.Lock()
 				additions, deletions := calculateDiffNative(repo, headCommit, job.path)
+				gitMu.Unlock()
 				fileInfo.Additions = additions
 				fileInfo.Deletions = deletions
 			}
