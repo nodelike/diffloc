@@ -30,7 +30,38 @@ func NewFilter(allowedExts []string, customExcludes []string, respectGitignore b
 	}
 
 	if len(allowedExts) == 0 {
-		defaultExts := []string{".go", ".py", ".js", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".mjs", ".cjs"}
+		defaultExts := []string{
+			// Go
+			".go",
+			// Python
+			".py", ".pyi", ".pyw",
+			// JavaScript / TypeScript
+			".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts",
+			// Web components
+			".vue", ".svelte", ".astro",
+			// Rust
+			".rs",
+			// C / C++
+			".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hxx", ".hh",
+			// JVM languages
+			".java", ".kt", ".kts", ".scala", ".groovy", ".clj", ".cljs", ".cljc",
+			// .NET languages
+			".cs", ".fs", ".fsx", ".vb",
+			// Apple platforms
+			".swift", ".m", ".mm",
+			// Other popular languages
+			".rb", ".php", ".dart", ".lua", ".pl", ".pm",
+			".ex", ".exs", ".erl", ".hrl", ".hs", ".ml", ".mli",
+			".jl", ".r", ".nim", ".zig",
+			// Shell scripting
+			".sh", ".bash", ".zsh", ".fish", ".ps1",
+			// Styles
+			".css", ".scss", ".sass", ".less", ".styl",
+			// Markup
+			".html", ".htm",
+			// Data / query / schema
+			".sql", ".graphql", ".gql", ".proto",
+		}
 		for _, ext := range defaultExts {
 			f.allowedExts[ext] = true
 		}
@@ -51,6 +82,7 @@ func NewFilter(allowedExts []string, customExcludes []string, respectGitignore b
 		`(^|/)\.git($|/)`,
 		`(^|/)dist($|/)`,
 		`(^|/)build($|/)`,
+		`(^|/)target($|/)`,
 		`(^|/)\.egg-info($|/)`,
 		`(^|/)\.tox($|/)`,
 		`(^|/)coverage($|/)`,

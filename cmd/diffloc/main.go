@@ -24,7 +24,6 @@ var (
 	path           string
 	cpuProfile     string
 	memProfile     string
-	staticOutput   bool
 	jsonOutput     bool
 	maxDepth       int
 )
@@ -59,7 +58,6 @@ func init() {
 		cmd.Flags().StringArrayVar(&allowedExts, "ext", []string{}, "Override allowed file extensions (can be repeated)")
 		cmd.Flags().StringVar(&cpuProfile, "profile-cpu", "", "Write CPU profile to file")
 		cmd.Flags().StringVar(&memProfile, "profile-mem", "", "Write memory profile to file")
-		cmd.Flags().BoolVar(&staticOutput, "static", false, "Print static output without interactive UI")
 		cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output results as JSON")
 		cmd.Flags().IntVar(&maxDepth, "max-depth", 0, "Maximum directory traversal depth (0 = unlimited)")
 
@@ -186,16 +184,8 @@ func runAnalyze(cmd *cobra.Command, args []string) {
 			os.Exit(1)
 		}
 		fmt.Println(string(output))
-	} else if staticOutput {
-		if err := ui.PrintStatic(stats); err != nil {
-			fmt.Fprintf(os.Stderr, "Error printing output: %v\n", err)
-			os.Exit(1)
-		}
 	} else {
-		if err := ui.Run(stats); err != nil {
-			fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
-			os.Exit(1)
-		}
+		ui.PrintStatic(stats)
 	}
 
 	if memProfile != "" {

@@ -1,5 +1,5 @@
 # diffloc
-Git diff & line count statistics with a clean TUI. Shows line counts, additions, and deletions for your codebase. Works in non-git repos too.
+Git diff & line count statistics. Shows line counts, additions, and deletions for your codebase. Works in non-git repos too.
 
 <p align="center">
   <img src="assets/preview.png" width="600" alt="diffloc preview">
@@ -10,10 +10,9 @@ Git diff & line count statistics with a clean TUI. Shows line counts, additions,
 - Works in git repos and non-git directories
 - Respects .gitignore (optional)
 - Smart filtering for common artifacts
-- Interactive sorting
-- JSON and static output modes
+- JSON output mode
 - Configurable via file or flags
-- Supports Golang, JavaScript, and Python projects (extensible via [.diffloc.yaml](#config-file))
+- Supports all mainstream languages out of the box — Go, Rust, Python, JavaScript/TypeScript, C/C++, JVM, .NET, and more (extensible via [.diffloc.yaml](#config-file))
 
 ## Installation
 ```bash
@@ -31,27 +30,7 @@ go install github.com/nodelike/diffloc/cmd/diffloc@latest
 diffloc                    # Current directory
 diffloc /path/to/project   # Specific path
 diffloc --json             # JSON output
-diffloc --static           # Non-interactive output
 ```
-
-### Keyboard Controls
-
-**Scrolling:**
-- `↑` / `k` - Scroll up
-- `↓` / `j` - Scroll down
-- `PgUp` - Page up
-- `PgDn` - Page down
-- `Home` / `g` - Jump to top
-- `End` / `G` - Jump to bottom
-
-**Sorting:**
-- `n` - Sort by name
-- `l` - Sort by lines  
-- `a` - Sort by additions
-- `d` - Sort by deletions
-
-**Other:**
-- `q` - Quit
 
 ### Flags
 
@@ -63,7 +42,6 @@ diffloc --static           # Non-interactive output
 | `--ext <ext>` | Override allowed extensions (repeatable) |
 | `--max-depth <n>` | Limit directory depth (0 = unlimited) |
 | `--json` | Output as JSON |
-| `--static` | Non-interactive output |
 | `--config <file>` | Config file path (default: `.diffloc.yaml`) |
 
 ### Config File
@@ -84,11 +62,11 @@ ext:
 
 ## What Gets Excluded
 
-**Directories:** `node_modules`, `venv`, `.venv`, `__pycache__`, `.git`, `dist`, `build`, `.egg-info`, `.tox`, `coverage`, `.next`, `vendor`, `bin`, `tmp`
+**Directories:** `node_modules`, `venv`, `.venv`, `__pycache__`, `.git`, `dist`, `build`, `target`, `.egg-info`, `.tox`, `coverage`, `.next`, `vendor`, `bin`, `tmp`
 
 **Files:** Lock files (`*.lock`, `*-lock.json`), binaries (`*.exe`, `*.so`, `*.dylib`, `*.dll`), images (`*.jpg`, `*.png`, `*.svg`, etc.), generated files (`*_templ.go`, `*.pb.go`, `*.min.js`)
 
-**Default Extensions:** `.go`, `.py`, `.js`, `.jsx`, `.ts`, `.tsx`, `.vue`, `.svelte`, `.mjs`, `.cjs`
+**Default Extensions:** Common source files across mainstream languages, including `.go`, `.rs`, `.py`, `.js`/`.ts`/`.jsx`/`.tsx`, `.vue`/`.svelte`, `.c`/`.cpp`/`.h`/`.hpp`, `.java`/`.kt`/`.scala`, `.cs`/`.fs`, `.swift`, `.rb`, `.php`, `.css`/`.scss`, `.sql`, and more. Override with `--ext` or the config file.
 
 
 ## License

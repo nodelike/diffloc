@@ -21,29 +21,3 @@ type Stats struct {
 	TotalDeletions int
 	NetChange      int
 }
-
-// SortMode defines how files should be sorted
-type SortMode int
-
-const (
-	SortByName SortMode = iota
-	SortByLines
-	SortByAdditions
-	SortByDeletions
-)
-
-func (s SortMode) String() string {
-	switch s {
-	case SortByName:
-		return "name"
-	case SortByLines:
-		return "lines"
-	case SortByAdditions:
-		return "additions"
-	case SortByDeletions:
-		return "deletions"
-	default:
-		return "name"
-	}
-}
-
