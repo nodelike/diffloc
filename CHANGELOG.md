@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.8] - 2026-05-30
+
+### Added
+- Expanded default source extensions to cover all mainstream languages (Rust, C/C++, JVM, .NET, Swift, Ruby, PHP, shell, styles, SQL, and more) so projects like Rust/Tauri `src-tauri` are counted out of the box
+
+### Changed
+- Ignore the `target/` build directory by default (Rust/Maven), so generated artifacts no longer pollute counts
 
 ### Removed
 - Removed the interactive TUI mode (Bubble Tea viewport, keyboard sorting/scrolling) entirely

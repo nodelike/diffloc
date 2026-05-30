@@ -33,7 +33,7 @@ var rootCmd = &cobra.Command{
 	Short: "Diff Line Counter - analyze lines of code changes",
 	Long: `diffloc is a tool for analyzing lines of code in your projects,
 with special support for Git repositories to show changed vs unchanged files.`,
-	Version: "1.0.7",
+	Version: "1.0.8",
 }
 
 var analyzeCmd = &cobra.Command{
