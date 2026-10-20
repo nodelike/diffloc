@@ -19,6 +19,7 @@ Git diff & line count statistics. Shows line counts, additions, and deletions fo
 ```bash
 # Homebrew
 brew tap nodelike/tap
+brew trust nodelike/tap    # Homebrew 7+ refuses formulas from untrusted taps
 brew install diffloc
 
 # Go
