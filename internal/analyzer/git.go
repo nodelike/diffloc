@@ -1,360 +1,194 @@
 package analyzer
 
 import (
+	"bytes"
 	"context"
-	"os"
-	"path/filepath"
+	"errors"
+	"fmt"
+	"os/exec"
+	"strconv"
 	"strings"
-	"sync"
 
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/nodelike/diffloc/internal/model"
-	"github.com/schollz/progressbar/v3"
 	"golang.org/x/sync/errgroup"
 )
 
-// AnalyzeGit analyzes a git repository for changes
-func AnalyzeGit(ctx context.Context, rootPath string, filter *Filter) (*model.Stats, error) {
-	repo, err := git.PlainOpen(rootPath)
-	if err != nil {
-		return nil, err
+// emptyTree is git's well-known empty tree object, used as the base before the first commit.
+const emptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+// IsGitRepo reports whether path is inside a git work tree and git is installed.
+func IsGitRepo(ctx context.Context, path string) bool {
+	out, err := runGit(ctx, path, "rev-parse", "--is-inside-work-tree")
+	return err == nil && strings.TrimSpace(string(out)) == "true"
+}
+
+// AnalyzeGit reports per-file line counts for path, with additions and deletions
+// of the working tree (staged and unstaged) against HEAD. Paths are relative to path,
+// so running inside a subdirectory scopes the report to it.
+func AnalyzeGit(ctx context.Context, path string, filter *Filter) (*model.Stats, error) {
+	base := "HEAD"
+	if _, err := runGit(ctx, path, "rev-parse", "--verify", "--quiet", "HEAD^{commit}"); err != nil {
+		base = emptyTree
 	}
 
-	worktree, err := repo.Worktree()
-	if err != nil {
-		return nil, err
+	untrackedArgs := []string{"ls-files", "-z", "--others"}
+	if filter.respectGitignore {
+		untrackedArgs = append(untrackedArgs, "--exclude-standard")
 	}
 
-	head, err := repo.Head()
-	if err != nil {
-		return nil, err
-	}
-
-	headCommit, err := repo.CommitObject(head.Hash())
-	if err != nil {
-		return nil, err
-	}
-
-	headTree, err := headCommit.Tree()
-	if err != nil {
-		return nil, err
-	}
-
-	status, err := worktree.Status()
-	if err != nil {
-		return nil, err
-	}
-
-	stats := &model.Stats{
-		ChangedFiles:   make([]*model.FileInfo, 0),
-		UnchangedFiles: make([]*model.FileInfo, 0),
-	}
-
-	changedPaths := make(map[string]bool)
-	var statsMu sync.Mutex
-	var gitMu sync.Mutex // Protects concurrent access to git repository objects
-
-	type changedFileJob struct {
-		path       string
-		fileStatus *git.FileStatus
-	}
-
-	changedJobs := make([]changedFileJob, 0)
-	for path, fileStatus := range status {
-		if !filter.ShouldInclude(path) {
-			continue
-		}
-		changedPaths[path] = true
-		changedJobs = append(changedJobs, changedFileJob{path: path, fileStatus: fileStatus})
-	}
-
+	var numstat, untrackedOut, trackedOut []byte
 	eg, egCtx := errgroup.WithContext(ctx)
-	eg.SetLimit(16)
-
-	totalFiles := len(changedJobs)
-	var bar *progressbar.ProgressBar
-	if totalFiles > 1000 {
-		bar = progressbar.NewOptions(totalFiles,
-			progressbar.OptionSetWriter(os.Stderr),
-			progressbar.OptionSetDescription("Analyzing changed files"),
-			progressbar.OptionShowCount(),
-			progressbar.OptionSetWidth(40),
-			progressbar.OptionThrottle(100),
-		)
-		defer bar.Finish()
-	}
-
-	for _, job := range changedJobs {
-		job := job
-		eg.Go(func() error {
-			select {
-			case <-egCtx.Done():
-				return egCtx.Err()
-			default:
-			}
-			fullPath := filepath.Join(rootPath, job.path)
-
-			lines, err := CountLines(fullPath)
-			if err != nil {
-				lines = 0
-			}
-
-			fileInfo := &model.FileInfo{
-				Path:      job.path,
-				Lines:     lines,
-				Additions: 0,
-				Deletions: 0,
-				IsChanged: true,
-			}
-
-			switch {
-			case job.fileStatus.Staging == git.Untracked || job.fileStatus.Worktree == git.Untracked:
-				fileInfo.Additions = lines
-			case job.fileStatus.Worktree == git.Deleted || job.fileStatus.Staging == git.Deleted:
-				// For deleted files, count lines from HEAD commit
-				gitMu.Lock()
-				deletedLines := countLinesFromCommit(headTree, job.path)
-				gitMu.Unlock()
-				fileInfo.Deletions = deletedLines
-				fileInfo.Lines = 0
-			default:
-				gitMu.Lock()
-				additions, deletions := calculateDiffNative(repo, headCommit, job.path)
-				gitMu.Unlock()
-				fileInfo.Additions = additions
-				fileInfo.Deletions = deletions
-			}
-
-			statsMu.Lock()
-			stats.ChangedFiles = append(stats.ChangedFiles, fileInfo)
-			stats.TotalLines += fileInfo.Lines
-			stats.TotalAdditions += fileInfo.Additions
-			stats.TotalDeletions += fileInfo.Deletions
-			if bar != nil {
-				bar.Add(1)
-			}
-			statsMu.Unlock()
-
-			return nil
-		})
-	}
-
+	eg.Go(func() (err error) {
+		numstat, err = runGit(egCtx, path, "diff", "--numstat", "-z", "--relative", "--no-renames", "--no-ext-diff", "--no-textconv", base)
+		return err
+	})
+	eg.Go(func() (err error) {
+		untrackedOut, err = runGit(egCtx, path, untrackedArgs...)
+		return err
+	})
+	eg.Go(func() (err error) {
+		trackedOut, err = runGit(egCtx, path, "ls-files", "-z", "--cached", "--stage")
+		return err
+	})
 	if err := eg.Wait(); err != nil {
 		return nil, err
 	}
 
-	unchangedPaths := make([]string, 0)
-	err = headTree.Files().ForEach(func(f *object.File) error {
-		path := f.Name
-
-		if changedPaths[path] {
-			return nil
-		}
-
-		if !filter.ShouldInclude(path) {
-			return nil
-		}
-
-		unchangedPaths = append(unchangedPaths, path)
-		return nil
-	})
-
+	changes, err := parseNumstat(numstat)
 	if err != nil {
 		return nil, err
 	}
 
-	eg2, eg2Ctx := errgroup.WithContext(ctx)
-	eg2.SetLimit(16)
-
-	totalUnchanged := len(unchangedPaths)
-	var bar2 *progressbar.ProgressBar
-	if totalUnchanged > 1000 {
-		bar2 = progressbar.NewOptions(totalUnchanged,
-			progressbar.OptionSetWriter(os.Stderr),
-			progressbar.OptionSetDescription("Analyzing unchanged files"),
-			progressbar.OptionShowCount(),
-			progressbar.OptionSetWidth(40),
-			progressbar.OptionThrottle(100),
-		)
-		defer bar2.Finish()
+	type entry struct {
+		path      string
+		changed   bool
+		untracked bool
+		diff      numstatEntry
+	}
+	var entries []entry
+	seen := make(map[string]bool)
+	add := func(e entry) {
+		if seen[e.path] || !filter.ShouldInclude(e.path) {
+			return
+		}
+		seen[e.path] = true
+		entries = append(entries, e)
 	}
 
-	for _, path := range unchangedPaths {
-		path := path
-		eg2.Go(func() error {
-			select {
-			case <-eg2Ctx.Done():
-				return eg2Ctx.Err()
-			default:
-			}
-			fullPath := filepath.Join(rootPath, path)
-			lines, err := CountLines(fullPath)
-			if err != nil {
-				return nil
-			}
-
-			fileInfo := &model.FileInfo{
-				Path:      path,
-				Lines:     lines,
-				Additions: 0,
-				Deletions: 0,
-				IsChanged: false,
-			}
-
-			statsMu.Lock()
-			stats.UnchangedFiles = append(stats.UnchangedFiles, fileInfo)
-			stats.TotalLines += lines
-			if bar2 != nil {
-				bar2.Add(1)
-			}
-			statsMu.Unlock()
-
-			return nil
-		})
+	for p, d := range changes {
+		add(entry{path: p, changed: true, diff: d})
+	}
+	for _, p := range splitNul(untrackedOut) {
+		add(entry{path: p, changed: true, untracked: true})
+	}
+	for _, rec := range splitNul(trackedOut) {
+		// "<mode> <object> <stage>\t<path>"; gitlinks (submodules) have mode 160000.
+		meta, p, ok := strings.Cut(rec, "\t")
+		if !ok || strings.HasPrefix(meta, "160000 ") {
+			continue
+		}
+		add(entry{path: p})
 	}
 
-	if err := eg2.Wait(); err != nil {
+	paths := make([]string, len(entries))
+	for i, e := range entries {
+		paths[i] = e.path
+	}
+	counts, err := countAll(ctx, path, paths)
+	if err != nil {
 		return nil, err
 	}
 
-	stats.ChangedCount = len(stats.ChangedFiles)
-	stats.UnchangedCount = len(stats.UnchangedFiles)
-	stats.TotalFiles = stats.ChangedCount + stats.UnchangedCount
-	stats.NetChange = stats.TotalAdditions - stats.TotalDeletions
+	stats := &model.Stats{IsGitRepo: true}
+	for i, e := range entries {
+		c := counts[i]
+		if c.err != nil {
+			stats.Skipped = append(stats.Skipped, e.path)
+			continue
+		}
+		if c.missing && !e.changed {
+			// Tracked but absent without a diff, e.g. outside a sparse checkout.
+			continue
+		}
 
+		info := &model.FileInfo{Path: e.path, Lines: c.lines, IsChanged: e.changed}
+		switch {
+		case e.untracked:
+			info.Additions = c.lines
+		case e.changed:
+			info.Additions = e.diff.additions
+			info.Deletions = e.diff.deletions
+		}
+
+		if e.changed {
+			stats.ChangedFiles = append(stats.ChangedFiles, info)
+		} else {
+			stats.UnchangedFiles = append(stats.UnchangedFiles, info)
+		}
+	}
+
+	finalize(stats)
 	return stats, nil
 }
 
-// calculateDiffNative uses go-git's native diff to calculate additions and deletions
-func calculateDiffNative(repo *git.Repository, headCommit *object.Commit, path string) (additions, deletions int) {
-	headTree, err := headCommit.Tree()
-	if err != nil {
-		return 0, 0
-	}
+type numstatEntry struct {
+	additions int
+	deletions int
+}
 
-	headFile, err := headTree.File(path)
-	if err != nil {
-		return 0, 0
-	}
-
-	worktree, err := repo.Worktree()
-	if err != nil {
-		return 0, 0
-	}
-
-	fs := worktree.Filesystem
-	worktreeFile, err := fs.Open(path)
-	if err != nil {
-		return 0, 0
-	}
-	defer worktreeFile.Close()
-
-	worktreeContent := strings.Builder{}
-	buf := make([]byte, 4096)
-	for {
-		n, err := worktreeFile.Read(buf)
-		if n > 0 {
-			worktreeContent.Write(buf[:n])
+// parseNumstat parses `git diff --numstat -z --no-renames`: "<add>\t<del>\t<path>\0" per file.
+// Binary files report "-" for both counts and are recorded as zero.
+func parseNumstat(out []byte) (map[string]numstatEntry, error) {
+	changes := make(map[string]numstatEntry)
+	for _, rec := range splitNul(out) {
+		fields := strings.SplitN(rec, "\t", 3)
+		if len(fields) != 3 {
+			return nil, fmt.Errorf("unexpected git numstat record %q", rec)
 		}
-		if err != nil {
-			break
+		var e numstatEntry
+		if fields[0] != "-" {
+			n, err := strconv.Atoi(fields[0])
+			if err != nil {
+				return nil, fmt.Errorf("unexpected git numstat record %q", rec)
+			}
+			e.additions = n
 		}
-	}
-
-	headContent, err := headFile.Contents()
-	if err != nil {
-		return 0, 0
-	}
-
-	headLines := strings.Split(headContent, "\n")
-	workLines := strings.Split(worktreeContent.String(), "\n")
-
-	additions, deletions = computeLineDiff(headLines, workLines)
-
-	return additions, deletions
-}
-
-// computeLineDiff computes additions and deletions using a simplified diff algorithm
-func computeLineDiff(oldLines, newLines []string) (additions, deletions int) {
-	oldMap := make(map[string]int)
-	newMap := make(map[string]int)
-
-	for _, line := range oldLines {
-		oldMap[line]++
-	}
-
-	for _, line := range newLines {
-		newMap[line]++
-	}
-
-	for line, oldCount := range oldMap {
-		newCount := newMap[line]
-		if newCount < oldCount {
-			deletions += oldCount - newCount
+		if fields[1] != "-" {
+			n, err := strconv.Atoi(fields[1])
+			if err != nil {
+				return nil, fmt.Errorf("unexpected git numstat record %q", rec)
+			}
+			e.deletions = n
 		}
+		changes[fields[2]] = e
 	}
+	return changes, nil
+}
 
-	for line, newCount := range newMap {
-		oldCount := oldMap[line]
-		if newCount > oldCount {
-			additions += newCount - oldCount
+func splitNul(out []byte) []string {
+	out = bytes.TrimSuffix(out, []byte{0})
+	if len(out) == 0 {
+		return nil
+	}
+	return strings.Split(string(out), "\x00")
+}
+
+// runGit runs git in dir without taking optional locks, so it never blocks or
+// disturbs a concurrent git process in the same repository.
+func runGit(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "git", append([]string{"--no-optional-locks", "-C", dir}, args...)...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
 		}
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return nil, fmt.Errorf("git %s: %s", args[0], strings.TrimSpace(stderr.String()))
+		}
+		return nil, fmt.Errorf("git %s: %w", args[0], err)
 	}
-
-	return additions, deletions
-}
-
-// countLinesFromCommit counts lines in a file from a commit tree
-func countLinesFromCommit(tree *object.Tree, path string) int {
-	file, err := tree.File(path)
-	if err != nil {
-		return 0
-	}
-
-	content, err := file.Contents()
-	if err != nil {
-		return 0
-	}
-
-	if len(content) == 0 {
-		return 0
-	}
-
-	lines := strings.Split(content, "\n")
-	// If the file doesn't end with a newline, we still have the right count
-	// If it does end with a newline, Split will create an empty string at the end
-	if len(lines) > 0 && lines[len(lines)-1] == "" {
-		return len(lines) - 1
-	}
-	return len(lines)
-}
-
-// IsGitRepo checks if the given path is a git repository
-func IsGitRepo(path string) bool {
-	_, err := git.PlainOpen(path)
-	return err == nil
-}
-
-// GetRepoRoot returns the root path of the git repository
-func GetRepoRoot(path string) (string, error) {
-	repo, err := git.PlainOpen(path)
-	if err != nil {
-		return "", err
-	}
-
-	worktree, err := repo.Worktree()
-	if err != nil {
-		return "", err
-	}
-
-	return worktree.Filesystem.Root(), nil
-}
-
-// Analyze is the main entry point that decides between git and non-git analysis
-func Analyze(ctx context.Context, rootPath string, filter *Filter) (*model.Stats, error) {
-	if IsGitRepo(rootPath) {
-		return AnalyzeGit(ctx, rootPath, filter)
-	}
-	return AnalyzeFiles(ctx, rootPath, filter)
+	return out, nil
 }

@@ -2,117 +2,69 @@ package analyzer
 
 import (
 	"context"
-	"os"
+	"io/fs"
 	"path/filepath"
-	"sync"
 
 	"github.com/nodelike/diffloc/internal/model"
-	"github.com/schollz/progressbar/v3"
-	"golang.org/x/sync/errgroup"
 )
 
-// AnalyzeFiles analyzes files in a non-git directory
-func AnalyzeFiles(ctx context.Context, rootPath string, filter *Filter) (*model.Stats, error) {
-	stats := &model.Stats{
-		ChangedFiles:   make([]*model.FileInfo, 0),
-		UnchangedFiles: make([]*model.FileInfo, 0),
+// AnalyzeFiles counts lines in a directory that is not a git repository.
+func AnalyzeFiles(ctx context.Context, root string, filter *Filter) (*model.Stats, error) {
+	if err := filter.LoadGitignore(root); err != nil {
+		return nil, err
 	}
 
-	type fileJob struct {
-		fullPath string
-		relPath  string
-	}
-	
-	fileJobs := make([]fileJob, 0)
-	
-	err := filepath.WalkDir(rootPath, func(path string, d os.DirEntry, err error) error {
+	var paths []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
+			if path == root {
+				return err
+			}
 			return nil
 		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+
+		rel, err := filepath.Rel(root, path)
+		if err != nil || rel == "." {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
 
 		if d.IsDir() {
-			relPath, _ := filepath.Rel(rootPath, path)
-			if relPath != "." && !filter.ShouldInclude(relPath+"/dummy.go") {
+			if !filter.ShouldDescend(rel) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-
-		relPath, err := filepath.Rel(rootPath, path)
-		if err != nil {
-			return nil
+		if d.Type().IsRegular() && filter.ShouldInclude(rel) {
+			paths = append(paths, rel)
 		}
-
-		if !filter.ShouldInclude(relPath) {
-			return nil
-		}
-
-		fileJobs = append(fileJobs, fileJob{fullPath: path, relPath: relPath})
 		return nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
 
-	var statsMu sync.Mutex
-	eg, egCtx := errgroup.WithContext(ctx)
-	eg.SetLimit(16)
-
-	totalFiles := len(fileJobs)
-	var bar *progressbar.ProgressBar
-	if totalFiles > 1000 {
-		bar = progressbar.NewOptions(totalFiles,
-			progressbar.OptionSetWriter(os.Stderr),
-			progressbar.OptionSetDescription("Analyzing files"),
-			progressbar.OptionShowCount(),
-			progressbar.OptionSetWidth(40),
-			progressbar.OptionThrottle(100),
-		)
-		defer bar.Finish()
-	}
-
-	for _, job := range fileJobs {
-		job := job
-		eg.Go(func() error {
-			select {
-			case <-egCtx.Done():
-				return egCtx.Err()
-			default:
-			}
-			
-			lines, err := CountLines(job.fullPath)
-			if err != nil {
-				return nil
-			}
-
-			fileInfo := &model.FileInfo{
-				Path:      job.relPath,
-				Lines:     lines,
-				Additions: 0,
-				Deletions: 0,
-				IsChanged: false,
-			}
-
-			statsMu.Lock()
-			stats.UnchangedFiles = append(stats.UnchangedFiles, fileInfo)
-			stats.TotalLines += lines
-			if bar != nil {
-				bar.Add(1)
-			}
-			statsMu.Unlock()
-
-			return nil
-		})
-	}
-
-	if err := eg.Wait(); err != nil {
+	counts, err := countAll(ctx, root, paths)
+	if err != nil {
 		return nil, err
 	}
 
-	stats.TotalFiles = len(stats.UnchangedFiles)
-	stats.UnchangedCount = len(stats.UnchangedFiles)
+	stats := &model.Stats{}
+	for i, p := range paths {
+		c := counts[i]
+		if c.err != nil {
+			stats.Skipped = append(stats.Skipped, p)
+			continue
+		}
+		if c.missing {
+			continue
+		}
+		stats.UnchangedFiles = append(stats.UnchangedFiles, &model.FileInfo{Path: p, Lines: c.lines})
+	}
 
+	finalize(stats)
 	return stats, nil
 }
-

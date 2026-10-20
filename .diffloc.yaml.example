@@ -14,12 +14,12 @@ exclude:
   - "\\.pb\\.go$"
 
 # Allowed file extensions (overrides defaults)
-# Default extensions: .go, .py, .js, .jsx, .ts, .tsx, .vue, .svelte, .mjs, .cjs
+# Defaults cover mainstream languages (.go, .rs, .py, .js/.ts, .c/.cpp, .java, ...)
 # ext:
 #   - ".go"
 #   - ".py"
 #   - ".js"
 
-# Maximum directory traversal depth (0 = unlimited)
+# Maximum directory depth (0 = unlimited, 1 = top-level files only)
 max-depth: 0
 

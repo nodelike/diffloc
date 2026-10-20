@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-10-21
+
+### Changed
+- Git analysis now runs the `git` binary instead of go-git: 5-15x faster on large repositories (e.g. 9k files: 5.4s → 0.5s)
+- Additions and deletions come from `git diff --numstat`, so moved or reordered lines and repeated lines are counted correctly
+- Ignore rules come from git itself: nested `.gitignore` files, negations, `.git/info/exclude` and the global excludes file all apply
+- Clean git repositories now show the git report (changed/unchanged, net change) instead of the plain-directory one
+- Files are listed in a stable order; JSON output is sorted by path
+- Environment overrides now require the `DIFFLOC_` prefix (e.g. `DIFFLOC_EXCLUDE_TESTS`)
+- The config file is also looked up in the analyzed path, not only the current directory
+- Removed the progress bar and the go-git dependency
+
+### Fixed
+- `diffloc <path>` failed with "unknown command"; it now works like `diffloc analyze <path>`
+- Running inside a repository subdirectory was treated as a non-git directory
+- `--max-depth` was accepted but ignored
+- Files without a trailing newline were undercounted by one line
+- Repositories with no commits yet failed to analyze
+- Submodules and sparse-checkout paths no longer produce bogus entries
+- Invalid `--exclude` regexes were silently dropped; they are now an error
+- Unreadable files were silently counted as 0 lines; they are now reported as warnings and listed under `Skipped` in JSON
+- `--version` now reports the release version (and the module version for `go install` builds)
+- Root-level `.gitignore` patterns like `gen/` now match outside git repositories
+
 ## [1.0.8] - 2026-05-30
 
 ### Added

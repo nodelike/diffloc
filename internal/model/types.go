@@ -11,6 +11,7 @@ type FileInfo struct {
 
 // Stats represents aggregated statistics
 type Stats struct {
+	IsGitRepo      bool
 	ChangedFiles   []*FileInfo
 	UnchangedFiles []*FileInfo
 	TotalFiles     int
@@ -20,4 +21,6 @@ type Stats struct {
 	TotalAdditions int
 	TotalDeletions int
 	NetChange      int
+	// Skipped lists files that matched the filter but could not be read.
+	Skipped []string `json:",omitempty"`
 }

@@ -8,7 +8,8 @@ Git diff & line count statistics. Shows line counts, additions, and deletions fo
 
 ## Features
 - Works in git repos and non-git directories
-- Respects .gitignore (optional)
+- Exact per-file additions/deletions from `git diff --numstat` (staged + unstaged vs HEAD)
+- Respects .gitignore, nested .gitignore files, `.git/info/exclude` and your global excludes
 - Smart filtering for common artifacts
 - JSON output mode
 - Configurable via file or flags
@@ -28,7 +29,7 @@ go install github.com/nodelike/diffloc/cmd/diffloc@latest
 
 ```bash
 diffloc                    # Current directory
-diffloc /path/to/project   # Specific path
+diffloc /path/to/project   # Specific path (a repo subdirectory scopes the report to it)
 diffloc --json             # JSON output
 ```
 
@@ -40,7 +41,7 @@ diffloc --json             # JSON output
 | `--exclude-tests` | Exclude test files |
 | `--exclude <pattern>` | Custom exclusion regex (repeatable) |
 | `--ext <ext>` | Override allowed extensions (repeatable) |
-| `--max-depth <n>` | Limit directory depth (0 = unlimited) |
+| `--max-depth <n>` | Limit directory depth (0 = unlimited, 1 = top-level files only) |
 | `--json` | Output as JSON |
 | `--config <file>` | Config file path (default: `.diffloc.yaml`) |
 
@@ -60,9 +61,13 @@ ext:
   - ".py"
 ```
 
+Settings can also come from `DIFFLOC_*` environment variables, e.g. `DIFFLOC_EXCLUDE_TESTS=true`. The config file is looked up in the analyzed path, then the current directory.
+
+In git repositories diffloc shells out to `git`, so it needs `git` on your `PATH`. Without it, every directory is counted as a plain directory.
+
 ## What Gets Excluded
 
-**Directories:** `node_modules`, `venv`, `.venv`, `__pycache__`, `.git`, `dist`, `build`, `target`, `.egg-info`, `.tox`, `coverage`, `.next`, `vendor`, `bin`, `tmp`
+**Directories:** `node_modules`, `venv`, `.venv`, `__pycache__`, `.git`, `dist`, `build`, `target`, `*.egg-info`, `.tox`, `coverage`, `.next`, `vendor`, `bin`, `tmp`
 
 **Files:** Lock files (`*.lock`, `*-lock.json`), binaries (`*.exe`, `*.so`, `*.dylib`, `*.dll`), images (`*.jpg`, `*.png`, `*.svg`, etc.), generated files (`*_templ.go`, `*.pb.go`, `*.min.js`)
 

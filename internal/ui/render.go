@@ -15,10 +15,11 @@ func PrintStatic(stats *model.Stats) {
 	fmt.Print(renderStatic(stats))
 }
 
-// sortByLines sorts changed and unchanged files by line count (ascending).
+// sortByLines sorts changed and unchanged files by line count (ascending),
+// keeping the analyzer's path order for ties.
 func sortByLines(stats *model.Stats) {
 	byLines := func(files []*model.FileInfo) {
-		sort.Slice(files, func(i, j int) bool {
+		sort.SliceStable(files, func(i, j int) bool {
 			return files[i].Lines < files[j].Lines
 		})
 	}
@@ -31,7 +32,7 @@ func renderStatic(stats *model.Stats) string {
 	var b strings.Builder
 
 	b.WriteString(headerStyle.Render("✨ diffloc — Diff Line Counter"))
-	isGitRepo := stats.TotalAdditions > 0 || stats.TotalDeletions > 0 || stats.ChangedCount > 0
+	isGitRepo := stats.IsGitRepo
 
 	if isGitRepo {
 		if len(stats.UnchangedFiles) > 0 {
@@ -48,7 +49,7 @@ func renderStatic(stats *model.Stats) string {
 			b.WriteString(renderFileTable(stats.ChangedFiles, true, true))
 		}
 	} else {
-		allFiles := append(stats.ChangedFiles, stats.UnchangedFiles...)
+		allFiles := stats.UnchangedFiles
 		if len(allFiles) > 0 {
 			filesBadge := badgeStyle.Render(fmt.Sprintf("%d", len(allFiles)))
 			b.WriteString(sectionHeaderStyle.Render(filesBadge + " Files"))

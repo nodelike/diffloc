@@ -23,7 +23,7 @@ cmd/diffloc/          # Main entry
 internal/
 ├── analyzer/         # Git & file analysis
 ├── model/            # Data structures
-└── ui/               # TUI
+└── ui/               # Terminal output
 ```
 
 ## Standards

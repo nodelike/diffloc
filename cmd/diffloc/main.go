@@ -3,10 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"runtime/debug"
 	"runtime/pprof"
+	"strings"
 	"syscall"
 
 	"github.com/nodelike/diffloc/internal/analyzer"
@@ -28,12 +32,17 @@ var (
 	maxDepth       int
 )
 
+// version is set by goreleaser via -ldflags; go install builds fall back to module info.
+var version = ""
+
 var rootCmd = &cobra.Command{
-	Use:   "diffloc",
+	Use:   "diffloc [path]",
 	Short: "Diff Line Counter - analyze lines of code changes",
 	Long: `diffloc is a tool for analyzing lines of code in your projects,
 with special support for Git repositories to show changed vs unchanged files.`,
-	Version: "1.0.8",
+	Args:    cobra.MaximumNArgs(1),
+	Version: resolveVersion(),
+	Run:     runAnalyze,
 }
 
 var analyzeCmd = &cobra.Command{
@@ -45,143 +54,155 @@ showing changes and statistics.`,
 	Run:  runAnalyze,
 }
 
-func init() {
-	cobra.OnInitialize(initConfig)
+func resolveVersion() string {
+	if version != "" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return strings.TrimPrefix(info.Main.Version, "v")
+	}
+	return "dev"
+}
 
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is .diffloc.yaml)")
+func init() {
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is .diffloc.yaml in the target path or current directory)")
 
 	// Add all flags to both root and analyze commands so they work either way
 	addAnalyzeFlags := func(cmd *cobra.Command) {
 		cmd.Flags().BoolVar(&noGitignore, "no-gitignore", false, "Ignore .gitignore patterns (always-excluded patterns still apply)")
 		cmd.Flags().BoolVar(&excludeTests, "exclude-tests", false, "Exclude test files (_test.go, test/, tests/, *.test.*, *.spec.*)")
-		cmd.Flags().StringArrayVar(&customExcludes, "exclude", []string{}, "Additional exclusion pattern (can be repeated)")
+		cmd.Flags().StringArrayVar(&customExcludes, "exclude", []string{}, "Additional exclusion regex (can be repeated)")
 		cmd.Flags().StringArrayVar(&allowedExts, "ext", []string{}, "Override allowed file extensions (can be repeated)")
 		cmd.Flags().StringVar(&cpuProfile, "profile-cpu", "", "Write CPU profile to file")
 		cmd.Flags().StringVar(&memProfile, "profile-mem", "", "Write memory profile to file")
 		cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output results as JSON")
-		cmd.Flags().IntVar(&maxDepth, "max-depth", 0, "Maximum directory traversal depth (0 = unlimited)")
-
-		viper.BindPFlag("no-gitignore", cmd.Flags().Lookup("no-gitignore"))
-		viper.BindPFlag("exclude-tests", cmd.Flags().Lookup("exclude-tests"))
-		viper.BindPFlag("exclude", cmd.Flags().Lookup("exclude"))
-		viper.BindPFlag("ext", cmd.Flags().Lookup("ext"))
-		viper.BindPFlag("max-depth", cmd.Flags().Lookup("max-depth"))
+		cmd.Flags().IntVar(&maxDepth, "max-depth", 0, "Maximum directory depth (0 = unlimited, 1 = top-level files only)")
 	}
 
 	addAnalyzeFlags(analyzeCmd)
 	addAnalyzeFlags(rootCmd)
 
 	rootCmd.AddCommand(analyzeCmd)
-
-	rootCmd.Run = analyzeCmd.Run
 }
 
-func initConfig() {
+// loadConfig reads .diffloc.yaml from --config, the target path, or the current directory.
+func loadConfig(target string) error {
 	if cfgFile != "" {
 		viper.SetConfigFile(cfgFile)
 	} else {
+		viper.AddConfigPath(target)
 		viper.AddConfigPath(".")
 		viper.SetConfigType("yaml")
 		viper.SetConfigName(".diffloc")
 	}
 
+	viper.SetEnvPrefix("DIFFLOC")
+	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 	viper.AutomaticEnv()
 
-	if err := viper.ReadInConfig(); err == nil {
-		fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())
+	if err := viper.ReadInConfig(); err != nil {
+		var notFound viper.ConfigFileNotFoundError
+		if errors.As(err, &notFound) {
+			return nil
+		}
+		return err
 	}
+	fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())
+	return nil
+}
+
+func fail(format string, a ...any) {
+	fmt.Fprintf(os.Stderr, "Error: "+format+"\n", a...)
+	os.Exit(1)
 }
 
 func runAnalyze(cmd *cobra.Command, args []string) {
+	path = "."
 	if len(args) > 0 {
 		path = args[0]
-	} else {
-		path = "."
 	}
 
-	if path == "." {
-		var err error
-		path, err = os.Getwd()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to get current directory: %v\n", err)
-			os.Exit(1)
-		}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		fail("failed to resolve path: %v", err)
 	}
+	path = absPath
 
 	if err := analyzer.ValidatePath(path); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("%v", err)
 	}
 
 	if shouldWarn, warning := analyzer.ShouldWarnLargeDirectory(path); shouldWarn {
 		fmt.Fprintln(os.Stderr, warning)
 	}
 
+	if err := loadConfig(path); err != nil {
+		fail("failed to read config: %v", err)
+	}
+
 	if cpuProfile != "" {
 		f, err := os.Create(cpuProfile)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to create CPU profile: %v\n", err)
-			os.Exit(1)
+			fail("failed to create CPU profile: %v", err)
 		}
 		defer f.Close()
 		if err := pprof.StartCPUProfile(f); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to start CPU profile: %v\n", err)
-			os.Exit(1)
+			fail("failed to start CPU profile: %v", err)
 		}
 		defer pprof.StopCPUProfile()
 	}
 
-	if !cmd.Flags().Changed("no-gitignore") {
+	flags := cmd.Flags()
+	if !flags.Changed("no-gitignore") {
 		noGitignore = viper.GetBool("no-gitignore")
 	}
-	if !cmd.Flags().Changed("exclude-tests") {
+	if !flags.Changed("exclude-tests") {
 		excludeTests = viper.GetBool("exclude-tests")
 	}
-	if len(customExcludes) == 0 {
+	if !flags.Changed("exclude") {
 		customExcludes = viper.GetStringSlice("exclude")
 	}
-	if len(allowedExts) == 0 {
+	if !flags.Changed("ext") {
 		allowedExts = viper.GetStringSlice("ext")
 	}
-	if maxDepth == 0 {
+	if !flags.Changed("max-depth") {
 		maxDepth = viper.GetInt("max-depth")
 	}
-
-	filter := analyzer.NewFilter(allowedExts, customExcludes, !noGitignore, excludeTests)
-
-	if !noGitignore && analyzer.IsGitRepo(path) {
-		repoRoot, err := analyzer.GetRepoRoot(path)
-		if err == nil {
-			filter.LoadGitignore(repoRoot)
-		}
+	if maxDepth < 0 {
+		fail("--max-depth must be 0 or greater")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	filter, err := analyzer.NewFilter(analyzer.FilterOptions{
+		Exts:             allowedExts,
+		Excludes:         customExcludes,
+		RespectGitignore: !noGitignore,
+		ExcludeTests:     excludeTests,
+		MaxDepth:         maxDepth,
+	})
+	if err != nil {
+		fail("%v", err)
+	}
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-sigChan
-		fmt.Fprintln(os.Stderr, "\nReceived interrupt signal, canceling...")
-		cancel()
-	}()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	stats, err := analyzer.Analyze(ctx, path, filter)
 	if err != nil {
-		if err == context.Canceled {
+		if ctx.Err() != nil {
 			fmt.Fprintln(os.Stderr, "\nAnalysis canceled by user")
 			os.Exit(130) // Standard exit code for SIGINT
 		}
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("%v", err)
+	}
+
+	for _, p := range stats.Skipped {
+		fmt.Fprintf(os.Stderr, "Warning: could not read %s\n", p)
 	}
 
 	if jsonOutput {
 		output, err := json.MarshalIndent(stats, "", "  ")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to marshal JSON: %v\n", err)
-			os.Exit(1)
+			fail("failed to marshal JSON: %v", err)
 		}
 		fmt.Println(string(output))
 	} else {
@@ -191,13 +212,11 @@ func runAnalyze(cmd *cobra.Command, args []string) {
 	if memProfile != "" {
 		f, err := os.Create(memProfile)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to create memory profile: %v\n", err)
-			os.Exit(1)
+			fail("failed to create memory profile: %v", err)
 		}
 		defer f.Close()
 		if err := pprof.WriteHeapProfile(f); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to write memory profile: %v\n", err)
-			os.Exit(1)
+			fail("failed to write memory profile: %v", err)
 		}
 	}
 }
